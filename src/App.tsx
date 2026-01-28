@@ -14,7 +14,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Calendar as CalendarIcon, 
   Mic, 
-  UserCircle2,
   Languages, 
   Play, 
   Download, 
@@ -423,16 +422,11 @@ function App() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
       <div className="max-w-6xl mx-auto space-y-6 relative">
         {/* Header */}
-        <div className="flex items-center justify-between gap-6">
-          <div className="flex-1 text-center space-y-2">
-            <h1 className="text-4xl font-bold text-slate-900 flex items-center justify-center gap-3">
-              <Mic className="h-10 w-10 text-pink-500" />
-              TikTok Audio Transcriber
-            </h1>
-          </div>
-          <Button variant="ghost" className="rounded-full h-16 w-16 p-0">
-            <UserCircle2 className="h-12 w-12" />
-          </Button>
+        <div className="text-center space-y-2">
+          <h1 className="text-4xl font-bold text-slate-900 flex items-center justify-center gap-3">
+            <Mic className="h-10 w-10 text-pink-500" />
+            TikTok Audio Transcriber
+          </h1>
         </div>
 
         {/* Configuration Card */}
