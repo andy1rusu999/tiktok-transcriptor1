@@ -341,7 +341,6 @@ function App() {
     }
 
     setIsBatchRunning(true);
-    setVideos(prev => prev.map(v => v.status === 'pending' ? { ...v, status: 'processing' } : v));
 
     try {
       const payload = {
