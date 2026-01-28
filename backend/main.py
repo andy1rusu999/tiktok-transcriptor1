@@ -252,7 +252,7 @@ def extract_username_from_url(video_url: str) -> str | None:
         return match.group(1)
     return None
 
-def fetch_direct_url_from_item_list(video_url: str) -> str | None:
+def fetch_direct_url_from_item_list(video_url: str, log=None) -> str | None:
     video_id = extract_video_id(video_url)
     if not video_id:
         return None
@@ -270,6 +270,13 @@ def fetch_direct_url_from_item_list(video_url: str) -> str | None:
     has_more = True
     max_pages = 40
     page = 0
+
+    def _log(msg: str):
+        if callable(log):
+            try:
+                log(msg)
+            except Exception:
+                pass
 
     while has_more and page < max_pages:
         params = {
@@ -292,12 +299,13 @@ def fetch_direct_url_from_item_list(video_url: str) -> str | None:
 
         try:
             response = requests.get(url, headers=headers, cookies=cookies, timeout=20)
+            _log(f"item_list HTTP {response.status_code} page={page} cursor={cursor}")
             if not response.ok:
-                print(f"Item list status {response.status_code}: {response.text[:200]}")
+                _log(f"item_list body (first 300): {response.text[:300]}")
                 return None
             data = response.json()
         except Exception as exc:
-            print(f"Failed to fetch item list page {page}: {exc}")
+            _log(f"item_list exception page={page}: {exc}")
             return None
 
         items = data.get("itemList") or data.get("item_list") or []
@@ -310,6 +318,55 @@ def fetch_direct_url_from_item_list(video_url: str) -> str | None:
         page += 1
 
     return None
+
+def fetch_direct_url_from_item_detail(video_url: str, log=None) -> str | None:
+    video_id = extract_video_id(video_url)
+    if not video_id:
+        return None
+    cookies = load_cookie_jar()
+    ms_token = cookies.get("msToken")
+    params = {
+        "aid": "1988",
+        "itemId": video_id,
+        "app_name": "tiktok_web",
+        "device_platform": "webapp",
+        "os": "web",
+    }
+    if ms_token:
+        params["msToken"] = ms_token
+    url = "https://www.tiktok.com/api/item/detail/?" + urllib.parse.urlencode(params)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': video_url,
+    }
+    cookie_header = build_cookie_header(cookies)
+    if cookie_header:
+        headers['Cookie'] = cookie_header
+
+    def _log(msg: str):
+        if callable(log):
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    try:
+        response = requests.get(url, headers=headers, cookies=cookies, timeout=20)
+        _log(f"item_detail HTTP {response.status_code} len={len(response.text or '')}")
+        if not response.ok:
+            _log(f"item_detail body (first 300): {(response.text or '')[:300]}")
+            return None
+        data = response.json()
+    except Exception as exc:
+        _log(f"item_detail exception: {exc}")
+        return None
+
+    item = data.get("itemInfo", {}).get("itemStruct")
+    if not item:
+        return None
+    return extract_url_from_item(item)
 
 def normalize_direct_url(url: str) -> str | None:
     if not url:
@@ -377,11 +434,19 @@ def fetch_direct_url(video_url: str) -> str | None:
 
     # METODA 2: item_list API (Fallback-ul care a mers la listare)
     log("Method 2: Trying item_list fallback...")
-    direct_from_list = fetch_direct_url_from_item_list(video_url)
+    direct_from_list = fetch_direct_url_from_item_list(video_url, log=log)
     if direct_from_list:
         log(f"item_list SUCCESS: {direct_from_list[:80]}")
         return direct_from_list
     log("item_list FAILED")
+
+    # METODA 2.5: item/detail API
+    log("Method 2.5: Trying item/detail API...")
+    direct_from_detail = fetch_direct_url_from_item_detail(video_url, log=log)
+    if direct_from_detail:
+        log(f"item_detail SUCCESS: {direct_from_detail[:80]}")
+        return direct_from_detail
+    log("item_detail FAILED")
 
     # METODA 3: Parse HTML for direct URL
     log("Method 3: Fetching HTML for direct URL parsing...")
@@ -554,6 +619,15 @@ def extract_url_from_html(html: str) -> str | None:
             return decoded
         except Exception:
             return raw
+    # Loose fallback: find any URL near playAddr/downloadAddr
+    hint_idx = html.find("playAddr")
+    if hint_idx == -1:
+        hint_idx = html.find("downloadAddr")
+    if hint_idx != -1:
+        window = html[max(0, hint_idx - 2000): hint_idx + 120000]
+        m = re.search(r'https?://[^\s\"\'<>]+', window)
+        if m:
+            return m.group(0)
     return None
 
 def download_media_url(media_url: str, target_path: str, referer: str | None = None) -> bool:
