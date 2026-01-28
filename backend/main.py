@@ -69,6 +69,7 @@ def try_fetch_subtitles(video_url: str, language: str | None) -> str | None:
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
+        'extractor_args': {'tiktok': {'impersonate': ['chrome']}},
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
@@ -80,8 +81,12 @@ def try_fetch_subtitles(video_url: str, language: str | None) -> str | None:
     if cookiefile:
         ydl_opts['cookiefile'] = cookiefile
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(video_url, download=False)
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(video_url, download=False)
+    except Exception as exc:
+        print(f"Subtitle extraction failed for {video_url}: {exc}")
+        return None
 
     subtitles = info.get('subtitles') or {}
     auto_captions = info.get('automatic_captions') or {}
@@ -259,7 +264,11 @@ def transcribe():
 
     try:
         # 1. Try extracting subtitles if available
-        subtitle_text = try_fetch_subtitles(video_url, language if language != 'auto' else None)
+        try:
+            subtitle_text = try_fetch_subtitles(video_url, language if language != 'auto' else None)
+        except Exception as exc:
+            print(f"Subtitle extraction error for {video_url}: {exc}")
+            subtitle_text = None
         if subtitle_text:
             if language == 'ro-md':
                 subtitle_text = apply_moldovan_slang(subtitle_text)
