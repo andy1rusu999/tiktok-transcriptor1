@@ -524,11 +524,46 @@ function App() {
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
       <div className="max-w-6xl mx-auto space-y-6 relative">
         {/* Header */}
-        <div className="text-center space-y-2">
-          <h1 className="text-4xl font-bold text-slate-900 flex items-center justify-center gap-3">
-            <Mic className="h-10 w-10 text-pink-500" />
-            TikTok Audio Transcriber
-          </h1>
+        <div className="flex items-center justify-between gap-6">
+          <div className="flex-1 text-center space-y-2">
+            <h1 className="text-4xl font-bold text-slate-900 flex items-center justify-center gap-3">
+              <Mic className="h-10 w-10 text-pink-500" />
+              TikTok Audio Transcriber
+            </h1>
+          </div>
+          {authUser && (
+            <Card className="shadow-lg">
+              <CardContent className="p-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      className="rounded-full h-16 w-16 overflow-hidden p-0"
+                    >
+                      <img
+                        src="/assets/image-c9127b13-8d4e-405d-8070-7e1b3cff7719.png"
+                        alt="Utilizator"
+                        className="h-full w-full object-cover"
+                      />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <div className="px-3 py-2 text-xs text-slate-500">
+                      Conectat ca <strong>{authUser.username}</strong>
+                    </div>
+                    {authUser.role === 'admin' && (
+                      <DropdownMenuItem onClick={() => setIsUserDialogOpen(true)}>
+                        Adaugă utilizator
+                      </DropdownMenuItem>
+                    )}
+                    <DropdownMenuItem onClick={handleLogout}>
+                      Delogare
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {authLoading ? (
@@ -573,40 +608,6 @@ function App() {
           </Card>
         ) : (
           <>
-            <div className="absolute top-4 right-4 z-10">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    className="rounded-full h-16 w-16 overflow-hidden p-0"
-                  >
-                    <img
-                      src="/assets/image-c9127b13-8d4e-405d-8070-7e1b3cff7719.png"
-                      alt="Utilizator"
-                      className="h-full w-full object-cover"
-                    />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <div className="px-3 py-2 text-xs text-slate-500">
-                    Conectat ca <strong>{authUser.username}</strong>
-                  </div>
-                  {authUser.role === 'admin' && (
-                    <DropdownMenuItem
-                      onClick={() => {
-                        setIsUserDialogOpen(true);
-                      }}
-                    >
-                      Adaugă utilizator
-                    </DropdownMenuItem>
-                  )}
-                  <DropdownMenuItem onClick={handleLogout}>
-                    Delogare
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-
             <Dialog open={isUserDialogOpen} onOpenChange={setIsUserDialogOpen}>
               <DialogContent>
                 <DialogHeader>
