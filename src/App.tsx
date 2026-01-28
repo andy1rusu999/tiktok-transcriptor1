@@ -42,6 +42,7 @@ interface VideoData {
   duration: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
   transcription?: string;
+  polished?: string;
   subtitles?: string;
   subtitlesStatus?: 'idle' | 'loading' | 'completed' | 'error';
   language: string;
@@ -298,6 +299,37 @@ function App() {
     URL.revokeObjectURL(url);
     
     toast.success('Transcriere descărcată');
+  };
+
+  const polishTranscription = async (videoId: string) => {
+    const video = videos.find(v => v.id === videoId);
+    if (!video?.transcription) return;
+
+    try {
+      const response = await fetch(`${apiBase}/polish`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text: video.transcription }),
+      });
+      const responseText = await response.text();
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw new Error(`Răspuns invalid de la server: ${responseText.slice(0, 200)}`);
+      }
+      if (!response.ok || data.error) {
+        throw new Error(data?.error || `Eroare server: ${response.status}`);
+      }
+      setVideos(prev => prev.map(v =>
+        v.id === videoId ? { ...v, polished: data.polished } : v
+      ));
+      toast.success('Text corectat cu Gemini.');
+    } catch (error: any) {
+      toast.error(error?.message || 'Nu am putut corecta textul.');
+    }
   };
 
   const exportCsv = () => {
@@ -686,12 +718,29 @@ function App() {
                             <TabsList>
                               <TabsTrigger value="transcription">Transcriere</TabsTrigger>
                               <TabsTrigger value="subtitles">Subtitrări</TabsTrigger>
+                              {video.transcription && (
+                                <TabsTrigger value="polished">Text corectat</TabsTrigger>
+                              )}
                             </TabsList>
                             <TabsContent value="transcription" className="mt-3">
                               <div className="p-3 bg-white border rounded-md">
                                 <p className="text-sm text-slate-700 whitespace-pre-wrap">
                                   {video.transcription || 'Transcrierea nu este disponibilă încă.'}
                                 </p>
+                              </div>
+                            </TabsContent>
+                            <TabsContent value="polished" className="mt-3">
+                              <div className="p-3 bg-white border rounded-md space-y-3">
+                                <p className="text-sm text-slate-700 whitespace-pre-wrap">
+                                  {video.polished || 'Apasă butonul pentru corectare.'}
+                                </p>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => polishTranscription(video.id)}
+                                >
+                                  Corectează cu Gemini
+                                </Button>
                               </div>
                             </TabsContent>
                             <TabsContent value="subtitles" className="mt-3">

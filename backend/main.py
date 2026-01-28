@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import requests
 import subprocess
 import sys
 import tempfile
@@ -53,6 +54,54 @@ def get_cookiefile():
     if cookiefile and os.path.exists(cookiefile):
         return cookiefile
     return None
+
+def call_gemini_polish(text: str) -> str | None:
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return None
+    endpoint = (
+        "https://generativelanguage.googleapis.com/v1beta/"
+        "models/gemini-1.5-flash:generateContent"
+    )
+    prompt = (
+        "Corectează gramatical textul de mai jos, păstrează sensul exact și "
+        "nu adăuga informații noi. Transcrie clar cuvintele spuse cu accent "
+        "moldovenesc în română standard (fără a schimba sensul)."
+    )
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": prompt},
+                    {"text": text},
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.2,
+            "topP": 0.9,
+            "maxOutputTokens": 2048,
+        },
+    }
+    try:
+        response = requests.post(
+            f"{endpoint}?key={api_key}",
+            json=payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            return None
+        parts = candidates[0].get("content", {}).get("parts", [])
+        if not parts:
+            return None
+        return parts[0].get("text")
+    except Exception as exc:
+        print(f"Gemini polish failed: {exc}")
+        return None
 
 
 def load_cookie_jar():
@@ -579,6 +628,18 @@ def subtitles():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/api/polish', methods=['POST'])
+@app.route('/polish', methods=['POST'])
+def polish():
+    data = request.json or {}
+    text = data.get("text", "")
+    if not text:
+        return jsonify({"error": "Text is required"}), 400
+    polished = call_gemini_polish(text)
+    if not polished:
+        return jsonify({"error": "Gemini is not configured or failed"}), 500
+    return jsonify({"polished": polished})
 
 
 @app.route('/', defaults={'path': ''})
