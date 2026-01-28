@@ -360,23 +360,56 @@ def fetch_direct_url_from_item_list(video_url: str) -> str | None:
 
     return None
 
-def extract_url_with_gemini(html: str) -> str | None:
+def extract_url_with_gemini(html: str, log=None) -> str | None:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key or not html:
         return None
+
+    def _log(msg: str):
+        if callable(log):
+            try:
+                log(msg)
+            except Exception:
+                pass
+
     endpoint = (
         "https://generativelanguage.googleapis.com/v1beta/"
         "models/gemini-1.5-flash:generateContent"
     )
-    # Trimitem doar părțile relevante din HTML (script-urile de stare) pentru a nu depăși limita de tokeni
-    scripts = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL)
-    relevant_content = "\n".join([s for s in scripts if "playAddr" in s or "downloadAddr" in s or "SIGI_STATE" in s or "UNIVERSAL_DATA" in s])
-    if not relevant_content:
-        relevant_content = html[:30000] # Fallback la începutul HTML-ului
+
+    # Prefer structured JSON blobs that actually contain the video data.
+    next_match = re.search(r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+    sigi_match = re.search(r'id="SIGI_STATE"[^>]*>(.*?)</script>', html, re.DOTALL)
+    uni_match = re.search(r'__UNIVERSAL_DATA_FOR_REHYDRATION__\s*=\s*({.*?})\s*;</script>', html, re.DOTALL)
+
+    relevant_content = None
+    if next_match:
+        relevant_content = next_match.group(1)
+        _log(f"Gemini input: __NEXT_DATA__ length={len(relevant_content)}")
+    elif sigi_match:
+        relevant_content = sigi_match.group(1)
+        _log(f"Gemini input: SIGI_STATE length={len(relevant_content)}")
+    elif uni_match:
+        relevant_content = uni_match.group(1)
+        _log(f"Gemini input: UNIVERSAL_DATA length={len(relevant_content)}")
+    else:
+        # Fallback: last resort — send a slice around keywords.
+        idx = html.find("playAddr")
+        if idx == -1:
+            idx = html.find("downloadAddr")
+        if idx == -1:
+            idx = 0
+        relevant_content = html[max(0, idx - 2000): idx + 120000]
+        _log(f"Gemini input: HTML slice start={max(0, idx-2000)} length={len(relevant_content)}")
+
+    # Keep within token limits.
+    if len(relevant_content) > 120_000:
+        relevant_content = relevant_content[:120_000]
 
     prompt = (
-        "Extract the direct video MP4 URL from the following TikTok HTML/JSON data. "
-        "Look for 'playAddr' or 'downloadAddr'. Return ONLY the raw URL string, nothing else."
+        "Extract the direct video URL from the TikTok data below.\n"
+        "- Look for playAddr / downloadAddr / urlList.\n"
+        "- Return ONLY the URL (no extra words, no quotes).\n"
     )
     payload = {
         "contents": [
@@ -388,18 +421,31 @@ def extract_url_with_gemini(html: str) -> str | None:
                 ],
             }
         ],
-        "generationConfig": {"temperature": 0.1},
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 256,
+        },
     }
     try:
-        response = requests.post(f"{endpoint}?key={api_key}", json=payload, timeout=20)
-        if response.ok:
-            data = response.json()
-            text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
-            if text.startswith("http"):
-                return text
+        response = requests.post(f"{endpoint}?key={api_key}", json=payload, timeout=25)
+        _log(f"Gemini HTTP {response.status_code}, len={len(response.text or '')}")
+        if not response.ok:
+            _log(f"Gemini error body (first 300): {(response.text or '')[:300]}")
+            return None
+        data = response.json()
+        text = (data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "") or "").strip()
+        if not text:
+            _log("Gemini returned empty text")
+            return None
+        # Gemini often returns "URL: https://..." — extract first URL robustly.
+        m = re.search(r'https?://[^\s\"\'<>]+', text)
+        if not m:
+            _log(f"Gemini returned non-URL text (first 120): {text[:120]}")
+            return None
+        return m.group(0).strip().strip('"').strip("'")
     except Exception as e:
-        print(f"Gemini URL extraction failed: {e}")
-    return None
+        _log(f"Gemini exception: {e}")
+        return None
 
 def fetch_direct_url(video_url: str) -> str | None:
     debug_log = Path("/tmp/tiktok_debug.log")
@@ -459,7 +505,7 @@ def fetch_direct_url(video_url: str) -> str | None:
     html = fetch_video_html(video_url, cookies)
     if html:
         log(f"HTML fetched, length: {len(html)}. Calling Gemini... (key={'yes' if os.environ.get('GEMINI_API_KEY') else 'no'})")
-        direct_gemini = extract_url_with_gemini(html)
+        direct_gemini = extract_url_with_gemini(html, log=log)
         if direct_gemini:
             log(f"Gemini extraction SUCCESS: {direct_gemini[:80]}")
             return direct_gemini
