@@ -205,7 +205,12 @@ def fetch_videos():
 
                 if start_day or end_day:
                     if not video_date:
-                        entry_url = entry.get('url')
+                        entry_url = (
+                            entry.get('webpage_url')
+                            or entry.get('original_url')
+                            or entry.get('url')
+                            or entry.get('id')
+                        )
                         if entry_url and not entry_url.startswith('http'):
                             entry_url = f"https://www.tiktok.com/@{username}/video/{entry_url}"
                         if entry_url:
