@@ -306,6 +306,24 @@ def fetch_direct_url(video_url: str) -> str | None:
                 return url_list[0]
     return None
 
+def download_media_url(media_url: str, target_path: str) -> bool:
+    cookies = load_cookie_jar()
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://www.tiktok.com/',
+    }
+    try:
+        with requests.get(media_url, headers=headers, cookies=cookies, stream=True, timeout=30) as response:
+            response.raise_for_status()
+            with open(target_path, 'wb') as handle:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        handle.write(chunk)
+        return True
+    except Exception as exc:
+        print(f"Failed to download media URL: {exc}")
+        return False
+
 def extract_subtitle_text(raw_text: str, ext: str) -> str:
     lines = []
     for line in raw_text.splitlines():
@@ -533,31 +551,15 @@ def transcribe():
             audio_path = os.path.join(tmpdir, 'audio')
             full_audio_path = audio_path + '.mp3'
             
-            # 2. Download video using yt-dlp library (impersonation from venv)
+            # 2. Resolve direct URL (from API) and download media via requests
+            if not direct_url:
+                direct_url = fetch_direct_url(video_url)
+            if not direct_url:
+                return jsonify({"error": "Nu am putut obține URL-ul direct pentru acest clip."}), 500
+
             video_path = os.path.join(tmpdir, 'video.mp4')
-            ydl_opts = {
-                'outtmpl': video_path,
-                'quiet': True,
-                'no_warnings': True,
-                'extractor_args': {'tiktok': {'impersonate': ['chrome']}},
-                'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                    'Referer': 'https://www.tiktok.com/',
-                },
-            }
-            cookiefile = get_cookiefile()
-            if cookiefile:
-                ydl_opts['cookiefile'] = cookiefile
-
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([video_url])
-            except Exception as exc:
-                return jsonify({"error": f"Failed to download video: {str(exc)}"}), 500
-
-            if not os.path.exists(video_path):
-                return jsonify({"error": "Video file was not created"}), 500
+            if not download_media_url(direct_url, video_path):
+                return jsonify({"error": "Nu am putut descărca video-ul."}), 500
 
             # 3. Extract audio using ffmpeg from downloaded video
             command = [
