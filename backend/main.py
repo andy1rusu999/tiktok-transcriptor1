@@ -480,21 +480,31 @@ def transcribe():
             audio_path = os.path.join(tmpdir, 'audio')
             full_audio_path = audio_path + '.mp3'
             
-            # 2. Download video using yt-dlp
+            # 2. Download video using yt-dlp library
             video_path = os.path.join(tmpdir, 'video.mp4')
+            ydl_opts = {
+                'outtmpl': video_path,
+                'quiet': True,
+                'no_warnings': True,
+                'extractor_args': {'tiktok': {'impersonate': ['chrome']}},
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                    'Referer': 'https://www.tiktok.com/',
+                },
+            }
             cookiefile = get_cookiefile()
-            cmd = [
-                sys.executable,
-                "-m",
-                "yt_dlp",
-                "--cookies", cookiefile if cookiefile else "/dev/null",
-                "--extractor-args", "tiktok:impersonate=chrome",
-                "-o", video_path,
-                video_url,
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0 or not os.path.exists(video_path):
-                return jsonify({"error": f"Failed to download video: {result.stderr}"}), 500
+            if cookiefile:
+                ydl_opts['cookiefile'] = cookiefile
+
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([video_url])
+            except Exception as exc:
+                return jsonify({"error": f"Failed to download video: {str(exc)}"}), 500
+
+            if not os.path.exists(video_path):
+                return jsonify({"error": "Video file was not created"}), 500
 
             # 3. Extract audio using ffmpeg from downloaded video
             command = [
