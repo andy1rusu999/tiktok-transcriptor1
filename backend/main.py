@@ -199,6 +199,59 @@ def fetch_videos_via_api(username: str, start_day, end_day):
 
     return videos
 
+def extract_video_id(video_url: str) -> str | None:
+    if not video_url:
+        return None
+    match = re.search(r'/video/(\d+)', video_url)
+    if match:
+        return match.group(1)
+    return None
+
+def fetch_direct_url(video_url: str) -> str | None:
+    video_id = extract_video_id(video_url)
+    if not video_id:
+        return None
+
+    cookies = load_cookie_jar()
+    ms_token = cookies.get("msToken")
+    params = {
+        "aid": "1988",
+        "itemId": video_id,
+    }
+    if ms_token:
+        params["msToken"] = ms_token
+    url = "https://www.tiktok.com/api/item/detail/?" + urllib.parse.urlencode(params)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': 'https://www.tiktok.com/',
+    }
+    cookie_header = build_cookie_header(cookies)
+    if cookie_header:
+        headers['Cookie'] = cookie_header
+
+    try:
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = response.read().decode("utf-8", errors="ignore")
+        data = json.loads(payload)
+    except Exception as exc:
+        print(f"Failed to fetch direct URL for {video_id}: {exc}")
+        return None
+
+    item = data.get("itemInfo", {}).get("itemStruct")
+    if not item:
+        return None
+    video_info = item.get("video", {}) or {}
+    play_addr = video_info.get("playAddr") or video_info.get("play_addr") or {}
+    download_addr = video_info.get("downloadAddr") or video_info.get("download_addr") or {}
+    for addr in (play_addr, download_addr):
+        if isinstance(addr, dict):
+            url_list = addr.get("urlList") or addr.get("url_list") or []
+            if url_list:
+                return url_list[0]
+    return None
+
 def extract_subtitle_text(raw_text: str, ext: str) -> str:
     lines = []
     for line in raw_text.splitlines():
@@ -426,6 +479,9 @@ def transcribe():
             audio_path = os.path.join(tmpdir, 'audio')
             full_audio_path = audio_path + '.mp3'
             
+            if not direct_url:
+                direct_url = fetch_direct_url(video_url)
+
             if direct_url:
                 # Use direct media URL from TikTok API when available
                 command = [
