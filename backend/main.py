@@ -1,6 +1,8 @@
+import json
 import os
 import re
 import tempfile
+import urllib.parse
 import urllib.request
 from pathlib import Path
 import whisper
@@ -46,6 +48,144 @@ def get_cookiefile():
     if cookiefile and os.path.exists(cookiefile):
         return cookiefile
     return None
+
+def load_cookie_jar():
+    cookiefile = get_cookiefile()
+    cookies = {}
+    if not cookiefile:
+        return cookies
+    try:
+        with open(cookiefile, "r", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 7:
+                    continue
+                name = parts[5]
+                value = parts[6]
+                cookies[name] = value
+    except Exception as exc:
+        print(f"Failed to read cookie file: {exc}")
+    return cookies
+
+def build_cookie_header(cookies: dict) -> str:
+    if not cookies:
+        return ""
+    return "; ".join([f"{key}={value}" for key, value in cookies.items()])
+
+def fetch_profile_html(username: str, cookies: dict) -> str | None:
+    url = f"https://www.tiktok.com/@{username}"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.tiktok.com/',
+    }
+    cookie_header = build_cookie_header(cookies)
+    if cookie_header:
+        headers['Cookie'] = cookie_header
+    try:
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return response.read().decode("utf-8", errors="ignore")
+    except Exception as exc:
+        print(f"Failed to fetch profile HTML for {username}: {exc}")
+        return None
+
+def resolve_secuid(username: str, cookies: dict) -> str | None:
+    if username.startswith("tiktokuser:"):
+        return username.split(":", 1)[1]
+    html = fetch_profile_html(username, cookies)
+    if not html:
+        return None
+    match = re.search(r'"secUid":"([^"]+)"', html)
+    if match:
+        return match.group(1)
+    return None
+
+def fetch_videos_via_api(username: str, start_day, end_day):
+    cookies = load_cookie_jar()
+    secuid = resolve_secuid(username, cookies)
+    if not secuid:
+        return []
+
+    ms_token = cookies.get("msToken")
+    cursor = 0
+    has_more = True
+    max_pages = 80
+    page = 0
+    videos = []
+
+    while has_more and page < max_pages:
+        params = {
+            "aid": "1988",
+            "count": "35",
+            "cursor": str(cursor),
+            "secUid": secuid,
+        }
+        if ms_token:
+            params["msToken"] = ms_token
+        url = "https://www.tiktok.com/api/post/item_list/?" + urllib.parse.urlencode(params)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': f"https://www.tiktok.com/@{username}",
+        }
+        cookie_header = build_cookie_header(cookies)
+        if cookie_header:
+            headers['Cookie'] = cookie_header
+
+        try:
+            request = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(request, timeout=20) as response:
+                payload = response.read().decode("utf-8", errors="ignore")
+        except Exception as exc:
+            print(f"Failed to fetch TikTok API page {page}: {exc}")
+            break
+
+        try:
+            data = json.loads(payload)
+        except Exception as exc:
+            print(f"Failed to parse TikTok API response: {exc}")
+            break
+
+        items = data.get("itemList") or data.get("item_list") or []
+        if not items:
+            break
+
+        for item in items:
+            create_time = item.get("createTime")
+            if not create_time:
+                continue
+            video_date = datetime.fromtimestamp(int(create_time)).replace(tzinfo=None)
+            if start_day and video_date.date() < start_day:
+                has_more = False
+                break
+            if end_day and video_date.date() > end_day:
+                continue
+
+            author = item.get("author", {})
+            author_name = author.get("uniqueId") or author.get("nickname") or username
+            video_id = item.get("id")
+            video_url = f"https://www.tiktok.com/@{author_name}/video/{video_id}" if video_id else None
+            duration = item.get("video", {}).get("duration")
+
+            videos.append({
+                "id": video_id,
+                "url": video_url,
+                "title": item.get("desc") or "Untitled Video",
+                "createdAt": video_date.isoformat(),
+                "duration": str(duration) if duration is not None else "0",
+                "status": "pending"
+            })
+
+        cursor = data.get("cursor", 0)
+        has_more = bool(data.get("hasMore"))
+        page += 1
+
+    return videos
 
 def extract_subtitle_text(raw_text: str, ext: str) -> str:
     lines = []
@@ -183,7 +323,10 @@ def fetch_videos():
     if username.startswith('@'):
         username = username[1:]
 
-    tiktok_url = f"https://www.tiktok.com/@{username}"
+    if username.startswith("tiktokuser:"):
+        tiktok_url = username
+    else:
+        tiktok_url = f"https://www.tiktok.com/@{username}"
     
     ydl_opts = {
         'extract_flat': True,
@@ -202,50 +345,52 @@ def fetch_videos():
     if cookiefile:
         ydl_opts['cookiefile'] = cookiefile
 
+    start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00')) if start_date_str else None
+    end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00')) if end_date_str else None
+    start_day = start_date.date() if start_date else None
+    end_day = end_date.date() if end_date else None
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             result = ydl.extract_info(tiktok_url, download=False)
-            
-            if 'entries' not in result:
-                return jsonify({"videos": []})
+    except Exception as exc:
+        print(f"yt-dlp user extraction failed: {exc}")
+        videos = fetch_videos_via_api(username, start_day, end_day)
+        return jsonify({"videos": videos})
 
-            videos = []
-            start_date = datetime.fromisoformat(start_date_str.replace('Z', '+00:00')) if start_date_str else None
-            end_date = datetime.fromisoformat(end_date_str.replace('Z', '+00:00')) if end_date_str else None
-            start_day = start_date.date() if start_date else None
-            end_day = end_date.date() if end_date else None
+    entries = result.get('entries') if isinstance(result, dict) else None
+    if not entries:
+        videos = fetch_videos_via_api(username, start_day, end_day)
+        return jsonify({"videos": videos})
 
-            for entry in result.get('entries', []):
-                if not entry:
-                    continue
-                
-                # Get date using our robust extractor
-                video_date = extract_video_date(entry)
+    videos = []
+    for entry in entries:
+        if not entry:
+            continue
 
-                if start_day or end_day:
-                    if not video_date:
-                        # Since we are in extract_flat: True, we rely on the ID
-                        continue
-                    
-                    video_day = video_date.date()
-                    if start_day and video_day < start_day:
-                        continue
-                    if end_day and video_day > end_day:
-                        continue
+        video_date = extract_video_date(entry)
+        if start_day or end_day:
+            if not video_date:
+                continue
+            video_day = video_date.date()
+            if start_day and video_day < start_day:
+                continue
+            if end_day and video_day > end_day:
+                continue
 
-                videos.append({
-                    "id": entry.get('id'),
-                    "url": entry.get('url') or (f"https://www.tiktok.com/@{username}/video/{entry.get('id')}" if entry.get('id') else None),
-                    "title": entry.get('title') or entry.get('description') or "Untitled Video",
-                    "createdAt": video_date.isoformat() if video_date else None,
-                    "duration": str(entry.get('duration', '0:00')),
-                    "status": "pending"
-                })
+        videos.append({
+            "id": entry.get('id'),
+            "url": entry.get('url') or (f"https://www.tiktok.com/@{username}/video/{entry.get('id')}" if entry.get('id') else None),
+            "title": entry.get('title') or entry.get('description') or "Untitled Video",
+            "createdAt": video_date.isoformat() if video_date else None,
+            "duration": str(entry.get('duration', '0:00')),
+            "status": "pending"
+        })
 
-            return jsonify({"videos": videos})
+    if not videos:
+        videos = fetch_videos_via_api(username, start_day, end_day)
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return jsonify({"videos": videos})
 
 @app.route('/api/health', methods=['GET'])
 @app.route('/health', methods=['GET'])
