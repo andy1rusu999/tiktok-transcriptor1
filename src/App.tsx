@@ -134,7 +134,13 @@ function App() {
       if (cancelled) return;
       try {
         const response = await fetch(`${apiBase}/job/${batchJobId}`);
-        const data = await response.json();
+        const responseText = await response.text();
+        let data: any;
+        try {
+          data = JSON.parse(responseText);
+        } catch {
+          throw new Error(`Răspuns invalid de la server: ${responseText.slice(0, 200)}`);
+        }
         if (!response.ok || data.error) {
           throw new Error(data?.error || `Eroare server: ${response.status}`);
         }
