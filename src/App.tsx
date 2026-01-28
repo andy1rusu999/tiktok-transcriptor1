@@ -11,9 +11,16 @@ import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { 
   Calendar as CalendarIcon, 
   Mic, 
+  UserCircle2,
   Languages, 
   Play, 
   Download, 
@@ -559,19 +566,36 @@ function App() {
           </Card>
         ) : (
           <>
-            <Card className="shadow-lg">
-              <CardContent className="flex items-center justify-between py-4">
-                <div className="text-sm text-slate-600">
-                  Conectat ca <strong>{authUser.username}</strong>
-                </div>
-                <Button variant="outline" onClick={handleLogout}>
-                  Ieșire
-                </Button>
-              </CardContent>
-            </Card>
+            <div className="flex items-center justify-end">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" className="rounded-full">
+                    <UserCircle2 className="h-6 w-6" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <div className="px-3 py-2 text-xs text-slate-500">
+                    Conectat ca <strong>{authUser.username}</strong>
+                  </div>
+                  {authUser.role === 'admin' && (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        const el = document.getElementById('admin-users');
+                        el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                    >
+                      Adaugă utilizator
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onClick={handleLogout}>
+                    Delogare
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
 
             {authUser.role === 'admin' && (
-              <Card className="shadow-lg">
+              <Card className="shadow-lg" id="admin-users">
                 <CardHeader>
                   <CardTitle>Administrare utilizatori</CardTitle>
                   <CardDescription>Doar adminul poate crea conturi noi.</CardDescription>
