@@ -192,66 +192,96 @@ def fetch_secuid_from_api(username: str, cookies: dict) -> str | None:
         return None
 
 def fetch_videos_via_api(username: str, start_day, end_day):
-    # Fallback using yt-dlp binary for listing
-    cookiefile = get_cookiefile()
-    yt_dlp_path = os.path.join(os.path.dirname(sys.executable), "yt-dlp")
-    
-    if username.startswith("tiktokuser:"):
-        tiktok_url = username
-    else:
-        tiktok_url = f"https://www.tiktok.com/@{username}"
+    cookies = load_cookie_jar()
+    secuid = resolve_secuid(username, cookies)
+    if not secuid:
+        return []
 
-    cmd = [
-        yt_dlp_path,
-        "--cookies", cookiefile if cookiefile else "/dev/null",
-        "--extractor-args", "tiktok:impersonate=chrome",
-        "--flat-playlist",
-        "--dump-json",
-        "--playlist-end", "100",
-        tiktok_url
-    ]
-    
+    ms_token = cookies.get("msToken")
+    cursor = 0
+    has_more = True
+    max_pages = 80
+    page = 0
     videos = []
-    try:
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        stdout, stderr = process.communicate()
-        
-        if process.returncode != 0 and not stdout:
-            print(f"yt-dlp listing failed: {stderr}")
-            return []
 
-        for line in stdout.splitlines():
-            try:
-                item = json.loads(line)
-                video_date = extract_video_date(item)
-                
-                if start_day or end_day:
-                    if not video_date:
-                        continue
-                    video_day = video_date.date()
-                    if start_day and video_day < start_day:
-                        continue
-                    if end_day and video_day > end_day:
-                        continue
+    while has_more and page < max_pages:
+        params = {
+            "aid": "1988",
+            "count": "35",
+            "cursor": str(cursor),
+            "secUid": secuid,
+        }
+        if ms_token:
+            params["msToken"] = ms_token
+        url = "https://www.tiktok.com/api/post/item_list/?" + urllib.parse.urlencode(params)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': f"https://www.tiktok.com/@{username}",
+        }
+        cookie_header = build_cookie_header(cookies)
+        if cookie_header:
+            headers['Cookie'] = cookie_header
 
-                author_name = item.get("uploader") or username
-                video_id = item.get("id")
-                video_url = f"https://www.tiktok.com/@{author_name}/video/{video_id}" if video_id else item.get("url")
+        try:
+            request = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(request, timeout=20) as response:
+                payload = response.read().decode("utf-8", errors="ignore")
+        except Exception as exc:
+            print(f"Failed to fetch TikTok API page {page}: {exc}")
+            break
 
-                videos.append({
-                    "id": video_id,
-                    "url": video_url,
-                    "title": item.get("title") or item.get("description") or "Untitled Video",
-                    "createdAt": video_date.isoformat() if video_date else None,
-                    "duration": str(item.get("duration", "0")),
-                    "status": "pending"
-                })
-            except Exception as e:
-                print(f"Error parsing line: {e}")
+        try:
+            data = json.loads(payload)
+        except Exception as exc:
+            print(f"Failed to parse TikTok API response: {exc}")
+            break
+
+        items = data.get("itemList") or data.get("item_list") or []
+        if not items:
+            break
+
+        for item in items:
+            create_time = item.get("createTime")
+            if not create_time:
                 continue
-    except Exception as exc:
-        print(f"Failed to fetch videos via binary: {exc}")
-        
+            video_date = datetime.fromtimestamp(int(create_time)).replace(tzinfo=None)
+            if start_day and video_date.date() < start_day:
+                has_more = False
+                break
+            if end_day and video_date.date() > end_day:
+                continue
+
+            author = item.get("author", {})
+            author_name = author.get("uniqueId") or author.get("nickname") or username
+            video_id = item.get("id")
+            video_url = f"https://www.tiktok.com/@{author_name}/video/{video_id}" if video_id else None
+            video_info = item.get("video", {}) or {}
+            duration = video_info.get("duration")
+            direct_url = None
+            play_addr = video_info.get("playAddr") or video_info.get("play_addr") or {}
+            download_addr = video_info.get("downloadAddr") or video_info.get("download_addr") or {}
+            for addr in (play_addr, download_addr):
+                if isinstance(addr, dict):
+                    url_list = addr.get("urlList") or addr.get("url_list") or []
+                    if url_list:
+                        direct_url = url_list[0]
+                        break
+
+            videos.append({
+                "id": video_id,
+                "url": video_url,
+                "directUrl": direct_url,
+                "title": item.get("desc") or "Untitled Video",
+                "createdAt": video_date.isoformat(),
+                "duration": str(duration) if duration is not None else "0",
+                "status": "pending"
+            })
+
+        cursor = data.get("cursor", 0)
+        has_more = bool(data.get("hasMore"))
+        page += 1
+
     return videos
 
 def extract_video_id(video_url: str) -> str | None:
@@ -592,39 +622,15 @@ def transcribe():
             audio_path = os.path.join(tmpdir, 'audio')
             full_audio_path = audio_path + '.mp3'
             
-            # 2. Resolve direct URL using the yt-dlp binary directly
+            # 2. Resolve direct URL (from API) and download media
+            if not direct_url:
+                direct_url = fetch_direct_url(video_url)
+            if not direct_url:
+                return jsonify({"error": "Nu am putut obține URL-ul direct pentru acest clip."}), 500
+
             video_path = os.path.join(tmpdir, 'video.mp4')
-            cookiefile = get_cookiefile()
-            yt_dlp_path = os.path.join(os.path.dirname(sys.executable), "yt-dlp")
-            
-            # First try to download the video directly with yt-dlp
-            cmd = [
-                yt_dlp_path,
-                "--cookies", cookiefile if cookiefile else "/dev/null",
-                "--extractor-args", "tiktok:impersonate=chrome",
-                "--no-warnings",
-                "-o", video_path,
-                video_url,
-            ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            if result.returncode != 0 or not os.path.exists(video_path):
-                # Fallback: get URL only, then download with requests
-                cmd_get_url = [
-                    yt_dlp_path,
-                    "--cookies", cookiefile if cookiefile else "/dev/null",
-                    "--extractor-args", "tiktok:impersonate=chrome",
-                    "--get-url",
-                    video_url
-                ]
-                res_url = subprocess.run(cmd_get_url, capture_output=True, text=True)
-                if res_url.returncode == 0 and res_url.stdout.strip():
-                    direct_url = res_url.stdout.strip().split('\n')[0]
-                    if not download_media_url(direct_url, video_path):
-                        return jsonify({"error": f"Failed to download after fallback: {res_url.stderr}"}), 500
-                else:
-                    return jsonify({"error": f"Failed to resolve video: {result.stderr}"}), 500
+            if not download_media_url(direct_url, video_path):
+                return jsonify({"error": "Nu am putut descărca video-ul."}), 500
 
             # 3. Extract audio using ffmpeg
             command = [
