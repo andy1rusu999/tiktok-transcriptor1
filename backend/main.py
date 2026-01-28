@@ -562,27 +562,48 @@ def transcribe():
             audio_path = os.path.join(tmpdir, 'audio')
             full_audio_path = audio_path + '.mp3'
             
-            # 2. Resolve direct URL (from API) and download media via requests
-            if not direct_url:
-                direct_url = fetch_direct_url(video_url)
-            if not direct_url:
-                return jsonify({"error": "Nu am putut obține URL-ul direct pentru acest clip."}), 500
-
+            # 2. Resolve direct URL using the yt-dlp binary directly
             video_path = os.path.join(tmpdir, 'video.mp4')
-            if not download_media_url(direct_url, video_path):
-                return jsonify({"error": "Nu am putut descărca video-ul."}), 500
+            cookiefile = get_cookiefile()
+            yt_dlp_path = os.path.join(os.path.dirname(sys.executable), "yt-dlp")
+            
+            # First try to download the video directly with yt-dlp
+            cmd = [
+                yt_dlp_path,
+                "--cookies", cookiefile if cookiefile else "/dev/null",
+                "--extractor-args", "tiktok:impersonate=chrome",
+                "--no-warnings",
+                "-o", video_path,
+                video_url,
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode != 0 or not os.path.exists(video_path):
+                # Fallback: get URL only, then download with requests
+                cmd_get_url = [
+                    yt_dlp_path,
+                    "--cookies", cookiefile if cookiefile else "/dev/null",
+                    "--extractor-args", "tiktok:impersonate=chrome",
+                    "--get-url",
+                    video_url
+                ]
+                res_url = subprocess.run(cmd_get_url, capture_output=True, text=True)
+                if res_url.returncode == 0 and res_url.stdout.strip():
+                    direct_url = res_url.stdout.strip().split('\n')[0]
+                    if not download_media_url(direct_url, video_path):
+                        return jsonify({"error": f"Failed to download after fallback: {res_url.stderr}"}), 500
+                else:
+                    return jsonify({"error": f"Failed to resolve video: {result.stderr}"}), 500
 
-            # 3. Extract audio using ffmpeg from downloaded video
+            # 3. Extract audio using ffmpeg
             command = [
                 "ffmpeg",
                 "-y",
-                "-i",
-                video_path,
+                "-i", video_path,
                 "-vn",
-                "-acodec",
-                "libmp3lame",
-                "-q:a",
-                "2",
+                "-acodec", "libmp3lame",
+                "-q:a", "2",
                 full_audio_path,
             ]
             result = subprocess.run(command, capture_output=True, text=True)
