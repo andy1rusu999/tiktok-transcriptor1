@@ -58,56 +58,6 @@ def get_cookiefile():
         return str(default_path)
     return None
 
-def call_gemini_polish(text: str) -> str | None:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        return None
-    gemini_model = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash-002")
-    endpoint = (
-        "https://generativelanguage.googleapis.com/v1beta/"
-        f"models/{gemini_model}:generateContent"
-    )
-    prompt = (
-        "Corectează gramatical textul de mai jos, păstrează sensul exact și "
-        "nu adăuga informații noi. Transcrie clar cuvintele spuse cu accent "
-        "moldovenesc în română standard (fără a schimba sensul)."
-    )
-    payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {"text": prompt},
-                    {"text": text},
-                ],
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.2,
-            "topP": 0.9,
-            "maxOutputTokens": 2048,
-        },
-    }
-    try:
-        response = requests.post(
-            f"{endpoint}?key={api_key}",
-            json=payload,
-            timeout=30,
-        )
-        response.raise_for_status()
-        data = response.json()
-        candidates = data.get("candidates") or []
-        if not candidates:
-            return None
-        parts = candidates[0].get("content", {}).get("parts", [])
-        if not parts:
-            return None
-        return parts[0].get("text")
-    except Exception as exc:
-        print(f"Gemini polish failed: {exc}")
-        return None
-
-
 def load_cookie_jar():
     cookiefile = get_cookiefile()
     cookies = {}
@@ -361,149 +311,24 @@ def fetch_direct_url_from_item_list(video_url: str) -> str | None:
 
     return None
 
-_GEMINI_MODEL_CACHE: str | None = None
-
-def _resolve_gemini_model(api_key: str, log=None) -> str | None:
-    global _GEMINI_MODEL_CACHE
-    if _GEMINI_MODEL_CACHE:
-        return _GEMINI_MODEL_CACHE
-
-    env_model = os.environ.get("GEMINI_MODEL")
-    if env_model:
-        _GEMINI_MODEL_CACHE = env_model
-        return env_model
-
-    def _log(msg: str):
-        if callable(log):
-            try:
-                log(msg)
-            except Exception:
-                pass
-
+def normalize_direct_url(url: str) -> str | None:
+    if not url:
+        return None
+    cleaned = url.strip().strip('"').strip("'")
+    cleaned = cleaned.replace("\\u0026", "&").replace("\\/", "/")
     try:
-        resp = requests.get(
-            f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
-            timeout=15,
-        )
-        if not resp.ok:
-            _log(f"Gemini ListModels HTTP {resp.status_code}: {resp.text[:200]}")
-            return None
-        data = resp.json()
-        models = [m.get("name", "") for m in (data.get("models") or []) if m.get("name")]
-        _log(f"Gemini ListModels count={len(models)}")
-
-        # Prefer flash > pro > legacy if available
-        preferred = [
-            "models/gemini-1.5-flash",
-            "models/gemini-1.5-pro",
-            "models/gemini-1.0-pro",
-        ]
-        for pref in preferred:
-            if pref in models:
-                _GEMINI_MODEL_CACHE = pref.replace("models/", "")
-                return _GEMINI_MODEL_CACHE
-
-        if models:
-            # Fallback to the first available model
-            _GEMINI_MODEL_CACHE = models[0].replace("models/", "")
-            return _GEMINI_MODEL_CACHE
-    except Exception as exc:
-        _log(f"Gemini ListModels exception: {exc}")
-        return None
-
-    return None
-
-def extract_url_with_gemini(html: str, log=None) -> str | None:
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key or not html:
-        return None
-
-    def _log(msg: str):
-        if callable(log):
-            try:
-                log(msg)
-            except Exception:
-                pass
-
-    gemini_model = _resolve_gemini_model(api_key, log=_log)
-    if not gemini_model:
-        _log("Gemini model resolution failed")
-        return None
-    endpoint = (
-        "https://generativelanguage.googleapis.com/v1beta/"
-        f"models/{gemini_model}:generateContent"
-    )
-
-    # Prefer structured JSON blobs that actually contain the video data.
-    next_match = re.search(r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
-    sigi_match = re.search(r'id="SIGI_STATE"[^>]*>(.*?)</script>', html, re.DOTALL)
-    uni_match = re.search(r'__UNIVERSAL_DATA_FOR_REHYDRATION__\s*=\s*({.*?})\s*;</script>', html, re.DOTALL)
-
-    relevant_content = None
-    if next_match:
-        relevant_content = next_match.group(1)
-        _log(f"Gemini input: __NEXT_DATA__ length={len(relevant_content)}")
-    elif sigi_match:
-        relevant_content = sigi_match.group(1)
-        _log(f"Gemini input: SIGI_STATE length={len(relevant_content)}")
-    elif uni_match:
-        relevant_content = uni_match.group(1)
-        _log(f"Gemini input: UNIVERSAL_DATA length={len(relevant_content)}")
-    else:
-        # Fallback: last resort — send a slice around keywords.
-        idx = html.find("playAddr")
-        if idx == -1:
-            idx = html.find("downloadAddr")
-        if idx == -1:
-            idx = 0
-        relevant_content = html[max(0, idx - 2000): idx + 120000]
-        _log(f"Gemini input: HTML slice start={max(0, idx-2000)} length={len(relevant_content)}")
-
-    # Keep within token limits.
-    if len(relevant_content) > 120_000:
-        relevant_content = relevant_content[:120_000]
-
-    prompt = (
-        "Extract the direct video URL from the TikTok data below.\n"
-        "- Look for playAddr / downloadAddr / urlList.\n"
-        "- Return ONLY the URL (no extra words, no quotes).\n"
-    )
-    payload = {
-        "contents": [
-            {
-                "role": "user",
-                "parts": [
-                    {"text": prompt},
-                    {"text": relevant_content},
-                ],
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.1,
-            "maxOutputTokens": 256,
-        },
-    }
-    try:
-        response = requests.post(f"{endpoint}?key={api_key}", json=payload, timeout=25)
-        _log(f"Gemini model: {gemini_model}")
-        _log(f"Gemini HTTP {response.status_code}, len={len(response.text or '')}")
-        if not response.ok:
-            _log(f"Gemini error body (first 300): {(response.text or '')[:300]}")
-            return None
-        data = response.json()
-        text = (data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "") or "").strip()
-        if not text:
-            _log("Gemini returned empty text")
-            return None
-        # Gemini often returns "URL: https://..." — extract first URL robustly.
-        m = re.search(r'https?://[^\s\"\'<>]+', text)
-        if not m:
-            _log(f"Gemini returned non-URL text (first 120): {text[:120]}")
-            return None
-        return m.group(0).strip().strip('"').strip("'")
-    except Exception as e:
-        _log(f"Gemini exception: {e}")
-        return None
+        parsed = urllib.parse.urlparse(cleaned)
+        if parsed.scheme and parsed.netloc:
+            host = parsed.netloc.rstrip(".")
+            if host.endswith("tiktok") and not host.endswith(".com"):
+                host = f"{host}.com"
+            elif host.endswith("tiktok") is False and host.endswith("tiktok.com") is False and host.endswith("tiktokcdn.com") is False:
+                if host.endswith("tiktok."):
+                    host = host.rstrip(".") + ".com"
+            cleaned = parsed._replace(netloc=host).geturl()
+    except Exception:
+        return cleaned
+    return cleaned
 
 def fetch_direct_url(video_url: str) -> str | None:
     debug_log = Path("/tmp/tiktok_debug.log")
@@ -558,20 +383,11 @@ def fetch_direct_url(video_url: str) -> str | None:
         return direct_from_list
     log("item_list FAILED")
 
-    # METODA 3: Gemini + HTML
-    log("Method 3: Fetching HTML for Gemini extraction...")
+    # METODA 3: Parse HTML for direct URL
+    log("Method 3: Fetching HTML for direct URL parsing...")
     html = fetch_video_html(video_url, cookies)
     if html:
-        log(f"HTML fetched, length: {len(html)}. Calling Gemini... (key={'yes' if os.environ.get('GEMINI_API_KEY') else 'no'})")
-        direct_gemini = extract_url_with_gemini(html, log=log)
-        if direct_gemini:
-            log(f"Gemini extraction SUCCESS: {direct_gemini[:80]}")
-            return direct_gemini
-        log("Gemini extraction FAILED")
-    
-    # METODA 4: Regex clasic pe HTML
-    if html:
-        log("Method 4: Trying final regex fallback on HTML...")
+        log(f"HTML fetched, length: {len(html)}. Parsing...")
         direct_from_html = extract_url_from_html(html)
         if direct_from_html:
             log(f"Final regex SUCCESS: {direct_from_html[:80]}")
@@ -1002,6 +818,7 @@ def transcribe():
             # 2. Resolve direct URL (from API) and download media
             if not direct_url:
                 direct_url = fetch_direct_url(video_url)
+            direct_url = normalize_direct_url(direct_url)
             if not direct_url:
                 return jsonify({"error": "Nu am putut obține URL-ul direct pentru acest clip."}), 500
 
@@ -1107,19 +924,6 @@ def subtitles():
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-@app.route('/api/polish', methods=['POST'])
-@app.route('/polish', methods=['POST'])
-def polish():
-    data = request.json or {}
-    text = data.get("text", "")
-    if not text:
-        return jsonify({"error": "Text is required"}), 400
-    polished = call_gemini_polish(text)
-    if not polished:
-        return jsonify({"error": "Gemini is not configured or failed"}), 500
-    return jsonify({"polished": polished})
-
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
