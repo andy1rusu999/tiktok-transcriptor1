@@ -2,6 +2,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import urllib.parse
 import urllib.request
@@ -483,7 +484,9 @@ def transcribe():
             if not direct_url:
                 cookiefile = get_cookiefile()
                 cmd = [
-                    "yt-dlp",
+                    sys.executable,
+                    "-m",
+                    "yt_dlp",
                     "--cookies", cookiefile if cookiefile else "/dev/null",
                     "--extractor-args", "tiktok:impersonate=chrome",
                     "--get-url",
