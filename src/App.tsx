@@ -55,8 +55,7 @@ const getApiBase = () => {
   if (envBase) {
     return envBase;
   }
-  const host = window.location.hostname === 'localhost' ? '127.0.0.1' : window.location.hostname;
-  return `http://${host}:5001`;
+  return '/api';
 };
 const apiBase = getApiBase();
 

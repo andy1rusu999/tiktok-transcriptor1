@@ -1,14 +1,15 @@
 import os
-import json
 import tempfile
+from pathlib import Path
 import whisper
 import yt_dlp
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from datetime import datetime
 
-app = Flask(__name__)
-CORS(app)
+dist_dir = Path(__file__).resolve().parent.parent / "dist"
+app = Flask(__name__, static_folder=str(dist_dir), static_url_path="/")
+CORS(app, resources={r"/api/*": {"origins": "*"}})
 
 # Load Whisper model globally to avoid reloading on every request
 # Using 'base' for a good balance between speed and accuracy
@@ -38,7 +39,7 @@ def apply_moldovan_slang(text: str) -> str:
         text = text.replace(src.capitalize(), dst.capitalize())
     return text
 
-@app.route('/fetch-videos', methods=['POST'])
+@app.route('/api/fetch-videos', methods=['POST'])
 def fetch_videos():
     data = request.json
     username = data.get('username')
@@ -110,11 +111,11 @@ def fetch_videos():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/health', methods=['GET'])
+@app.route('/api/health', methods=['GET'])
 def health():
     return jsonify({"status": "ok"}), 200
 
-@app.route('/transcribe', methods=['POST'])
+@app.route('/api/transcribe', methods=['POST'])
 def transcribe():
     data = request.json
     video_url = data.get('video_url')
@@ -170,5 +171,19 @@ def transcribe():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_frontend(path):
+    if dist_dir.exists():
+        file_path = dist_dir / path
+        if path and file_path.is_file():
+            return send_from_directory(dist_dir, path)
+        index_path = dist_dir / "index.html"
+        if index_path.exists():
+            return send_from_directory(dist_dir, "index.html")
+    return jsonify({"error": "Frontend build not found. Run npm run build."}), 404
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=True)
+    port = int(os.environ.get("PORT", "5001"))
+    debug = os.environ.get("FLASK_DEBUG") == "1"
+    app.run(host='0.0.0.0', port=port, debug=debug)
