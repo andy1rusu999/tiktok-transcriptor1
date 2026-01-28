@@ -17,7 +17,7 @@ from datetime import datetime
 dist_dir = Path(__file__).resolve().parent.parent / "dist"
 app = Flask(__name__, static_folder=str(dist_dir), static_url_path="/")
 
-cors_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+cors_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://165.227.169.91,https://transcribe.propagandahunter.net")
 cors_list = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
 CORS(app, resources={r"/api/*": {"origins": cors_list}})
 
