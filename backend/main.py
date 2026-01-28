@@ -399,20 +399,36 @@ def fetch_direct_url(video_url: str) -> str | None:
 
     try:
         response = requests.get(url, headers=headers, cookies=cookies, timeout=20)
-        log(f"item/detail status: {response.status_code}")
+        log(f"item/detail status: {response.status_code}, length: {len(response.text)}")
         if not response.ok:
             log(f"Response text: {response.text[:300]}")
-            log("Trying item_list fallback immediately")
+            log("Trying item_list fallback immediately (bad status)")
             direct_from_list = fetch_direct_url_from_item_list(video_url)
             if direct_from_list:
                 log(f"item_list fallback SUCCESS: {direct_from_list[:80]}")
                 return direct_from_list
             log("item_list fallback FAILED")
             return None
-        data = response.json()
-        log(f"Response keys: {list(data.keys())}")
+        try:
+            data = response.json()
+            log(f"Response keys: {list(data.keys())}")
+        except Exception as json_exc:
+            log(f"JSON parse failed: {json_exc}, text: {response.text[:300]}")
+            log("Trying item_list fallback immediately (invalid JSON)")
+            direct_from_list = fetch_direct_url_from_item_list(video_url)
+            if direct_from_list:
+                log(f"item_list fallback SUCCESS: {direct_from_list[:80]}")
+                return direct_from_list
+            log("item_list fallback FAILED")
+            return None
     except Exception as exc:
-        log(f"Exception: {exc}")
+        log(f"Request exception: {exc}")
+        log("Trying item_list fallback immediately (request failed)")
+        direct_from_list = fetch_direct_url_from_item_list(video_url)
+        if direct_from_list:
+            log(f"item_list fallback SUCCESS: {direct_from_list[:80]}")
+            return direct_from_list
+        log("item_list fallback FAILED")
         return None
 
     item = data.get("itemInfo", {}).get("itemStruct")
