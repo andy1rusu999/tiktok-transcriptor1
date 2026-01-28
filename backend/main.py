@@ -1004,6 +1004,14 @@ def transcribe():
             if audio.size == 0:
                 return jsonify({"error": "Downloaded audio has no samples"}), 500
 
+            # Guard against extremely short audio that breaks Whisper's mel shapes
+            try:
+                audio_seconds = float(audio.shape[0]) / 16000.0
+            except Exception:
+                audio_seconds = 0.0
+            if audio_seconds < 0.5:
+                return jsonify({"error": "Downloaded audio is too short to transcribe"}), 500
+
             try:
                 result = model.transcribe(audio, **transcribe_opts)
             except Exception as exc:
