@@ -373,9 +373,10 @@ def extract_url_with_gemini(html: str, log=None) -> str | None:
             except Exception:
                 pass
 
+    gemini_model = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash-002")
     endpoint = (
         "https://generativelanguage.googleapis.com/v1beta/"
-        "models/gemini-1.5-flash:generateContent"
+        f"models/{gemini_model}:generateContent"
     )
 
     # Prefer structured JSON blobs that actually contain the video data.
