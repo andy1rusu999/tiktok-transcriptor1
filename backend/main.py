@@ -150,15 +150,24 @@ def transcribe():
                 }],
                 'quiet': True,
                 'no_warnings': True,
+                'http_headers': {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Referer': 'https://www.tiktok.com/',
+                },
             }
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([video_url])
             
             full_audio_path = audio_path + '.mp3'
-            
+
             if not os.path.exists(full_audio_path):
                 return jsonify({"error": "Failed to download audio"}), 500
+
+            if os.path.getsize(full_audio_path) == 0:
+                return jsonify({"error": "Downloaded audio is empty"}), 500
 
             # 3. Transcribe using Whisper
             # Map languages if needed (OpenAI Whisper handles 'ro', 'ru' etc.)
@@ -168,7 +177,11 @@ def transcribe():
                 whisper_lang = 'ro' if language == 'ro-md' else language
                 transcribe_opts['language'] = whisper_lang
 
-            result = model.transcribe(full_audio_path, **transcribe_opts)
+            audio = whisper.load_audio(full_audio_path)
+            if audio.size == 0:
+                return jsonify({"error": "Downloaded audio has no samples"}), 500
+
+            result = model.transcribe(audio, **transcribe_opts)
             transcription_text = result['text']
             if language == 'ro-md':
                 transcription_text = apply_moldovan_slang(transcription_text)
