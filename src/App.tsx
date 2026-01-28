@@ -59,6 +59,49 @@ const getApiBase = () => {
 };
 const apiBase = getApiBase();
 
+const parseDurationToSeconds = (duration: string) => {
+  const trimmed = duration.trim();
+  if (!trimmed) return 0;
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+  const parts = trimmed.split(':').map(part => Number(part));
+  if (parts.some(Number.isNaN)) {
+    return 0;
+  }
+  if (parts.length === 3) {
+    const [hours, minutes, seconds] = parts;
+    return hours * 3600 + minutes * 60 + seconds;
+  }
+  if (parts.length === 2) {
+    const [minutes, seconds] = parts;
+    return minutes * 60 + seconds;
+  }
+  return 0;
+};
+
+const formatDuration = (duration: string) => {
+  const totalSeconds = parseDurationToSeconds(duration);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const labelParts = [
+    hours > 0 ? `${hours} h` : null,
+    minutes > 0 || hours > 0 ? `${minutes} min` : null,
+    `${seconds} sec`,
+  ].filter(Boolean);
+  const timeParts = [
+    hours > 0 ? String(hours).padStart(2, '0') : null,
+    String(minutes).padStart(2, '0'),
+    String(seconds).padStart(2, '0'),
+  ].filter(Boolean);
+  return {
+    label: labelParts.join(' '),
+    clock: timeParts.join(':'),
+    seconds: totalSeconds,
+  };
+};
+
 function App() {
   const [username, setUsername] = useState('');
   const [dateRange, setDateRange] = useState<{ from?: Date; to?: Date }>({});
@@ -552,16 +595,21 @@ function App() {
                             {getStatusBadge(video.status)}
                           </div>
                           <div className="flex items-center gap-4 text-sm text-slate-500">
+                            {(() => {
+                              const durationInfo = formatDuration(video.duration);
+                              return (
+                                <span className="flex items-center gap-1">
+                                  <Clock className="h-4 w-4" />
+                                  Durata: {durationInfo.clock} ({durationInfo.label}, {durationInfo.seconds}s)
+                                </span>
+                              );
+                            })()}
                             <span className="flex items-center gap-1">
-                              <Clock className="h-4 w-4" />
-                              {video.duration}
-                            </span>
-                            <span>
-                              {format(video.createdAt, 'dd MMM yyyy', { locale: ro })}
+                              Data: {format(video.createdAt, 'dd MMM yyyy', { locale: ro })}
                             </span>
                             <span className="flex items-center gap-1">
                               <Languages className="h-4 w-4" />
-                              {languages.find(l => l.value === video.language)?.label}
+                              Limbă: {languages.find(l => l.value === video.language)?.label}
                             </span>
                           </div>
                           
