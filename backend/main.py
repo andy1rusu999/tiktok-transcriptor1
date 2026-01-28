@@ -404,33 +404,45 @@ def fetch_direct_url(video_url: str) -> str | None:
     cookiefile = get_cookiefile()
     log(f"Cookies loaded: {len(cookies)} items, msToken={'yes' if cookies.get('msToken') else 'no'}")
     
-    # METODA 1: yt-dlp (din venv). Fără extractor impersonate args:
-    # pe serverul tău impersonation targets sunt "unavailable", iar asta rupe TikTok.
-    log("Method 1: Trying yt-dlp (venv, no impersonate args)...")
-    try:
+    def yt_dlp_get_url(use_impersonate: bool) -> str | None:
         cmd = [
             sys.executable, "-m", "yt_dlp",
             "--cookies", cookiefile if cookiefile else "/dev/null",
             "--no-warnings",
             "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "--add-header", f"Referer:{video_url}",
-            "--get-url",
-            video_url
         ]
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
-        if res.returncode == 0 and res.stdout.strip():
-            url = res.stdout.strip().split('\n')[0]
-            if url.startswith("http"):
-                log(f"yt-dlp SUCCESS: {url[:80]}")
-                return url
-        # IMPORTANT: fără stderr complet vedem doar warning-ul, nu cauza reală
-        log(f"yt-dlp failed (code {res.returncode})")
-        if res.stdout.strip():
-            log(f"yt-dlp stdout (first 500): {res.stdout[:500]}")
-        if res.stderr.strip():
-            log(f"yt-dlp stderr (first 2000): {res.stderr[:2000]}")
-    except Exception as e:
-        log(f"yt-dlp exception: {e}")
+        if use_impersonate:
+            cmd += ["--extractor-args", "tiktok:impersonate=chrome"]
+        cmd += ["--get-url", video_url]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+            if res.returncode == 0 and res.stdout.strip():
+                url = res.stdout.strip().split('\n')[0]
+                if url.startswith("http"):
+                    return url
+            log(f"yt-dlp failed (impersonate={use_impersonate}) code {res.returncode}")
+            if res.stdout.strip():
+                log(f"yt-dlp stdout (first 500): {res.stdout[:500]}")
+            if res.stderr.strip():
+                log(f"yt-dlp stderr (first 2000): {res.stderr[:2000]}")
+        except Exception as e:
+            log(f"yt-dlp exception (impersonate={use_impersonate}): {e}")
+        return None
+
+    # METODA 1: yt-dlp fără impersonate
+    log("Method 1: Trying yt-dlp (no impersonate args)...")
+    url_no_imp = yt_dlp_get_url(False)
+    if url_no_imp:
+        log(f"yt-dlp SUCCESS: {url_no_imp[:80]}")
+        return url_no_imp
+
+    # METODA 1b: yt-dlp cu impersonate (chiar dacă targets apar unavailable, uneori funcționează)
+    log("Method 1b: Trying yt-dlp (impersonate=chrome)...")
+    url_imp = yt_dlp_get_url(True)
+    if url_imp:
+        log(f"yt-dlp SUCCESS (impersonate): {url_imp[:80]}")
+        return url_imp
 
     # METODA 2: item_list API (Fallback-ul care a mers la listare)
     log("Method 2: Trying item_list fallback...")
@@ -455,8 +467,9 @@ def fetch_direct_url(video_url: str) -> str | None:
         log(f"HTML fetched, length: {len(html)}. Parsing...")
         direct_from_html = extract_url_from_html(html)
         if direct_from_html:
-            log(f"Final regex SUCCESS: {direct_from_html[:80]}")
-            return direct_from_html
+            normalized = normalize_direct_url(direct_from_html)
+            log(f"Final regex SUCCESS: {normalized[:120]}")
+            return normalized
 
     log("ALL METHODS FAILED")
     return None
@@ -469,6 +482,13 @@ def build_video_html_candidates(video_url: str) -> list[str]:
             f"https://www.tiktok.com/embed/v2/{video_id}",
             f"https://www.tiktok.com/embed/{video_id}",
             f"https://m.tiktok.com/v/{video_id}.html",
+        ])
+    # Try webapp variants that often include richer JSON
+    if "tiktok.com/" in video_url:
+        candidates.extend([
+            f"{video_url}?is_copy_url=1&is_from_webapp=v1",
+            f"{video_url}?lang=en",
+            f"{video_url}?is_copy_url=1&is_from_webapp=v1&lang=en",
         ])
     seen = set()
     ordered = []
