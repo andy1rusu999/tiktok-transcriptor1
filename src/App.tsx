@@ -17,6 +17,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { 
   Calendar as CalendarIcon, 
   Mic, 
@@ -132,6 +139,7 @@ function App() {
   const [loginPassword, setLoginPassword] = useState('');
   const [newUserUsername, setNewUserUsername] = useState('');
   const [newUserPassword, setNewUserPassword] = useState('');
+  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
 
   useEffect(() => {
     const loadAuth = async () => {
@@ -569,8 +577,8 @@ function App() {
             <div className="flex items-center justify-end">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="rounded-full">
-                    <UserCircle2 className="h-6 w-6" />
+                  <Button variant="ghost" className="rounded-full h-12 w-12">
+                    <UserCircle2 className="h-8 w-8" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -580,8 +588,7 @@ function App() {
                   {authUser.role === 'admin' && (
                     <DropdownMenuItem
                       onClick={() => {
-                        const el = document.getElementById('admin-users');
-                        el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        setIsUserDialogOpen(true);
                       }}
                     >
                       Adaugă utilizator
@@ -594,13 +601,15 @@ function App() {
               </DropdownMenu>
             </div>
 
-            {authUser.role === 'admin' && (
-              <Card className="shadow-lg" id="admin-users">
-                <CardHeader>
-                  <CardTitle>Administrare utilizatori</CardTitle>
-                  <CardDescription>Doar adminul poate crea conturi noi.</CardDescription>
-                </CardHeader>
-                <CardContent className="grid gap-4 md:grid-cols-3">
+            <Dialog open={isUserDialogOpen} onOpenChange={setIsUserDialogOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Adaugă utilizator</DialogTitle>
+                  <DialogDescription>
+                    Doar adminul poate crea conturi noi.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="new-username">Utilizator nou</Label>
                     <Input
@@ -620,14 +629,12 @@ function App() {
                       placeholder="parolă"
                     />
                   </div>
-                  <div className="flex items-end">
-                    <Button onClick={handleCreateUser} className="w-full">
-                      Adaugă utilizator
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+                  <Button onClick={handleCreateUser} className="w-full">
+                    Adaugă utilizator
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
 
         {/* Configuration Card */}
         <Card className="shadow-lg">
