@@ -356,7 +356,13 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await response.json();
+      const responseText = await response.text();
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw new Error(`Răspuns invalid de la server: ${responseText.slice(0, 200)}`);
+      }
       if (!response.ok || data.error) {
         throw new Error(data?.error || `Eroare server: ${response.status}`);
       }
