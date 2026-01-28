@@ -36,6 +36,7 @@ import './App.css';
 interface VideoData {
   id: string;
   url: string;
+  directUrl?: string;
   title: string;
   createdAt: Date;
   duration: string;
@@ -205,6 +206,9 @@ function App() {
       const payload: Record<string, string> = {
         video_url: video.url,
       };
+      if (video.directUrl) {
+        payload.direct_url = video.directUrl;
+      }
       if (selectedLanguage !== 'auto') {
         payload.language = selectedLanguage;
       }

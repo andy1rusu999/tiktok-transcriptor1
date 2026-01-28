@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import subprocess
 import tempfile
 import urllib.parse
 import urllib.request
@@ -170,11 +171,22 @@ def fetch_videos_via_api(username: str, start_day, end_day):
             author_name = author.get("uniqueId") or author.get("nickname") or username
             video_id = item.get("id")
             video_url = f"https://www.tiktok.com/@{author_name}/video/{video_id}" if video_id else None
-            duration = item.get("video", {}).get("duration")
+            video_info = item.get("video", {}) or {}
+            duration = video_info.get("duration")
+            direct_url = None
+            play_addr = video_info.get("playAddr") or video_info.get("play_addr") or {}
+            download_addr = video_info.get("downloadAddr") or video_info.get("download_addr") or {}
+            for addr in (play_addr, download_addr):
+                if isinstance(addr, dict):
+                    url_list = addr.get("urlList") or addr.get("url_list") or []
+                    if url_list:
+                        direct_url = url_list[0]
+                        break
 
             videos.append({
                 "id": video_id,
                 "url": video_url,
+                "directUrl": direct_url,
                 "title": item.get("desc") or "Untitled Video",
                 "createdAt": video_date.isoformat(),
                 "duration": str(duration) if duration is not None else "0",
@@ -402,6 +414,7 @@ def health():
 def transcribe():
     data = request.json
     video_url = data.get('video_url')
+    direct_url = data.get('direct_url')
     language = data.get('language') # e.g., 'ro', 'ru', 'auto'
 
     if not video_url:
@@ -411,34 +424,51 @@ def transcribe():
         # 1. Create a temporary directory to store the audio file
         with tempfile.TemporaryDirectory() as tmpdir:
             audio_path = os.path.join(tmpdir, 'audio')
-            
-            # 2. Download audio using yt-dlp
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'outtmpl': audio_path,
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '192',
-                }],
-                'quiet': True,
-                'no_warnings': True,
-                'extractor_args': {'tiktok': {'impersonate': ['chrome']}},
-                'http_headers': {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                    'Accept-Language': 'en-US,en;q=0.9',
-                    'Referer': 'https://www.tiktok.com/',
-                },
-            }
-            cookiefile = get_cookiefile()
-            if cookiefile:
-                ydl_opts['cookiefile'] = cookiefile
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([video_url])
-            
             full_audio_path = audio_path + '.mp3'
+            
+            if direct_url:
+                # Use direct media URL from TikTok API when available
+                command = [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    direct_url,
+                    "-vn",
+                    "-acodec",
+                    "libmp3lame",
+                    "-q:a",
+                    "2",
+                    full_audio_path,
+                ]
+                result = subprocess.run(command, capture_output=True, text=True)
+                if result.returncode != 0:
+                    return jsonify({"error": f"Failed to extract audio from direct URL: {result.stderr}"}), 500
+            else:
+                # 2. Download audio using yt-dlp
+                ydl_opts = {
+                    'format': 'bestaudio/best',
+                    'outtmpl': audio_path,
+                    'postprocessors': [{
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }],
+                    'quiet': True,
+                    'no_warnings': True,
+                    'extractor_args': {'tiktok': {'impersonate': ['chrome']}},
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Referer': 'https://www.tiktok.com/',
+                    },
+                }
+                cookiefile = get_cookiefile()
+                if cookiefile:
+                    ydl_opts['cookiefile'] = cookiefile
+                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([video_url])
 
             if not os.path.exists(full_audio_path):
                 return jsonify({"error": "Failed to download audio"}), 500
