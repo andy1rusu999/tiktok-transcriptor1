@@ -27,6 +27,7 @@ import {
 import { 
   Calendar as CalendarIcon, 
   Mic, 
+  UserCircle2,
   Languages, 
   Play, 
   Download, 
@@ -532,37 +533,26 @@ function App() {
             </h1>
           </div>
           {authUser && (
-            <Card className="shadow-lg">
-              <CardContent className="p-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      className="rounded-full h-16 w-16 overflow-hidden p-0"
-                    >
-                      <img
-                        src="/assets/image-c9127b13-8d4e-405d-8070-7e1b3cff7719.png"
-                        alt="Utilizator"
-                        className="h-full w-full object-cover"
-                      />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <div className="px-3 py-2 text-xs text-slate-500">
-                      Conectat ca <strong>{authUser.username}</strong>
-                    </div>
-                    {authUser.role === 'admin' && (
-                      <DropdownMenuItem onClick={() => setIsUserDialogOpen(true)}>
-                        Adaugă utilizator
-                      </DropdownMenuItem>
-                    )}
-                    <DropdownMenuItem onClick={handleLogout}>
-                      Delogare
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </CardContent>
-            </Card>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="rounded-full h-16 w-16 p-0">
+                  <UserCircle2 className="h-12 w-12" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <div className="px-3 py-2 text-xs text-slate-500">
+                  Conectat ca <strong>{authUser.username}</strong>
+                </div>
+                {authUser.role === 'admin' && (
+                  <DropdownMenuItem onClick={() => setIsUserDialogOpen(true)}>
+                    Adaugă utilizator
+                  </DropdownMenuItem>
+                )}
+                <DropdownMenuItem onClick={handleLogout}>
+                  Delogare
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
 
