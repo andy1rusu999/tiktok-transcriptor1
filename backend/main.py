@@ -479,52 +479,38 @@ def transcribe():
             audio_path = os.path.join(tmpdir, 'audio')
             full_audio_path = audio_path + '.mp3'
             
+            # 2. Get direct media URL using yt-dlp --get-url
             if not direct_url:
-                direct_url = fetch_direct_url(video_url)
-
-            if direct_url:
-                # Use direct media URL from TikTok API when available
-                command = [
-                    "ffmpeg",
-                    "-y",
-                    "-i",
-                    direct_url,
-                    "-vn",
-                    "-acodec",
-                    "libmp3lame",
-                    "-q:a",
-                    "2",
-                    full_audio_path,
-                ]
-                result = subprocess.run(command, capture_output=True, text=True)
-                if result.returncode != 0:
-                    return jsonify({"error": f"Failed to extract audio from direct URL: {result.stderr}"}), 500
-            else:
-                # 2. Download audio using yt-dlp
-                ydl_opts = {
-                    'format': 'bestaudio/best',
-                    'outtmpl': audio_path,
-                    'postprocessors': [{
-                        'key': 'FFmpegExtractAudio',
-                        'preferredcodec': 'mp3',
-                        'preferredquality': '192',
-                    }],
-                    'quiet': True,
-                    'no_warnings': True,
-                    'extractor_args': {'tiktok': {'impersonate': ['chrome']}},
-                    'http_headers': {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
-                        'Accept-Language': 'en-US,en;q=0.9',
-                        'Referer': 'https://www.tiktok.com/',
-                    },
-                }
                 cookiefile = get_cookiefile()
-                if cookiefile:
-                    ydl_opts['cookiefile'] = cookiefile
-                
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([video_url])
+                cmd = [
+                    "yt-dlp",
+                    "--cookies", cookiefile if cookiefile else "/dev/null",
+                    "--extractor-args", "tiktok:impersonate=chrome",
+                    "--get-url",
+                    video_url,
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode == 0 and result.stdout.strip():
+                    direct_url = result.stdout.strip().split('\n')[0]
+                else:
+                    return jsonify({"error": f"Failed to resolve media URL: {result.stderr}"}), 500
+
+            # 3. Extract audio using ffmpeg
+            command = [
+                "ffmpeg",
+                "-y",
+                "-i",
+                direct_url,
+                "-vn",
+                "-acodec",
+                "libmp3lame",
+                "-q:a",
+                "2",
+                full_audio_path,
+            ]
+            result = subprocess.run(command, capture_output=True, text=True)
+            if result.returncode != 0:
+                return jsonify({"error": f"Failed to extract audio: {result.stderr}"}), 500
 
             if not os.path.exists(full_audio_path):
                 return jsonify({"error": "Failed to download audio"}), 500
