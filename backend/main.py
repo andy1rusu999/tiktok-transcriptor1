@@ -305,6 +305,9 @@ def fetch_direct_url(video_url: str) -> str | None:
     params = {
         "aid": "1988",
         "itemId": video_id,
+        "app_name": "tiktok_web",
+        "device_platform": "webapp",
+        "os": "web",
     }
     if ms_token:
         params["msToken"] = ms_token
@@ -312,17 +315,19 @@ def fetch_direct_url(video_url: str) -> str | None:
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://www.tiktok.com/',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': video_url,
     }
     cookie_header = build_cookie_header(cookies)
     if cookie_header:
         headers['Cookie'] = cookie_header
 
     try:
-        request = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(request, timeout=20) as response:
-            payload = response.read().decode("utf-8", errors="ignore")
-        data = json.loads(payload)
+        response = requests.get(url, headers=headers, cookies=cookies, timeout=20)
+        if not response.ok:
+            print(f"Direct URL API status {response.status_code}: {response.text[:200]}")
+            return None
+        data = response.json()
     except Exception as exc:
         print(f"Failed to fetch direct URL for {video_id}: {exc}")
         return None
@@ -367,7 +372,8 @@ def fetch_video_html(video_url: str, cookies: dict) -> str | None:
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://www.tiktok.com/',
+        'Referer': video_url,
+        'Upgrade-Insecure-Requests': '1',
     }
     last_html = None
     for url in build_video_html_candidates(video_url):
@@ -377,6 +383,8 @@ def fetch_video_html(video_url: str, cookies: dict) -> str | None:
                 last_html = response.text
                 if len(last_html) > 2000:
                     return last_html
+            else:
+                print(f"HTML fetch {url} status {response.status_code}")
         except Exception as exc:
             print(f"Failed to fetch video HTML from {url}: {exc}")
             continue
