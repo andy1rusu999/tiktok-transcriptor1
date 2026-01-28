@@ -971,6 +971,24 @@ def transcribe():
             if os.path.getsize(full_audio_path) == 0:
                 return jsonify({"error": "Downloaded audio is empty"}), 500
 
+            # Validate audio duration before Whisper to avoid zero-length tensor errors
+            probe_cmd = [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=nokey=1:noprint_wrappers=1",
+                full_audio_path,
+            ]
+            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True)
+            if probe_result.returncode != 0:
+                return jsonify({"error": f"Failed to probe audio: {probe_result.stderr}"}), 500
+            try:
+                duration_sec = float((probe_result.stdout or "").strip() or "0")
+            except ValueError:
+                duration_sec = 0.0
+            if duration_sec <= 0:
+                return jsonify({"error": "Downloaded audio has zero duration"}), 500
+
             # 3. Transcribe using Whisper
             # Map languages if needed (OpenAI Whisper handles 'ro', 'ru' etc.)
             transcribe_opts = {}
@@ -979,11 +997,17 @@ def transcribe():
                 whisper_lang = 'ro' if language == 'ro-md' else language
                 transcribe_opts['language'] = whisper_lang
 
-            audio = whisper.load_audio(full_audio_path)
+            try:
+                audio = whisper.load_audio(full_audio_path)
+            except Exception as exc:
+                return jsonify({"error": f"Failed to load audio for Whisper: {exc}"}), 500
             if audio.size == 0:
                 return jsonify({"error": "Downloaded audio has no samples"}), 500
 
-            result = model.transcribe(audio, **transcribe_opts)
+            try:
+                result = model.transcribe(audio, **transcribe_opts)
+            except Exception as exc:
+                return jsonify({"error": f"Whisper failed to transcribe audio: {exc}"}), 500
             transcription_text = result['text']
             if language == 'ro-md':
                 transcription_text = apply_moldovan_slang(transcription_text)
