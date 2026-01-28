@@ -40,6 +40,7 @@ def apply_moldovan_slang(text: str) -> str:
     return text
 
 @app.route('/api/fetch-videos', methods=['POST'])
+@app.route('/fetch-videos', methods=['POST'])
 def fetch_videos():
     data = request.json
     username = data.get('username')
@@ -49,7 +50,14 @@ def fetch_videos():
     if not username:
         return jsonify({"error": "Username is required"}), 400
 
-    # Clean username
+    # Clean username/link
+    if 'tiktok.com/' in username:
+        # Extract @username from URL
+        import re
+        match = re.search(r'@([^/?#]+)', username)
+        if match:
+            username = match.group(1)
+    
     if username.startswith('@'):
         username = username[1:]
 
@@ -112,10 +120,12 @@ def fetch_videos():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/api/health', methods=['GET'])
+@app.route('/health', methods=['GET'])
 def health():
     return jsonify({"status": "ok"}), 200
 
 @app.route('/api/transcribe', methods=['POST'])
+@app.route('/transcribe', methods=['POST'])
 def transcribe():
     data = request.json
     video_url = data.get('video_url')

@@ -69,8 +69,20 @@ function App() {
 
   // Încărcare videoclipuri din perioada selectată via backend
   const fetchVideos = async () => {
-    if (!username) {
-      toast.error('Te rugăm să introduci numele de utilizator TikTok');
+    let cleanUsername = username.trim();
+    
+    // Extrage username-ul dacă utilizatorul a introdus un link complet
+    if (cleanUsername.includes('tiktok.com/')) {
+      const match = cleanUsername.match(/@([^/?#]+)/);
+      if (match) {
+        cleanUsername = match[1];
+      }
+    } else if (cleanUsername.startsWith('@')) {
+      cleanUsername = cleanUsername.substring(1);
+    }
+
+    if (!cleanUsername) {
+      toast.error('Te rugăm să introduci numele de utilizator sau link-ul contului TikTok');
       return;
     }
     if (!dateRange.from || !dateRange.to) {
@@ -79,6 +91,7 @@ function App() {
     }
 
     setIsLoading(true);
+    setVideos([]); // Curăță lista veche
     
     try {
       const response = await fetch(`${apiBase}/fetch-videos`, {
@@ -87,7 +100,7 @@ function App() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          username,
+          username: cleanUsername,
           start_date: dateRange.from.toISOString(),
           end_date: dateRange.to.toISOString(),
         }),
@@ -331,14 +344,14 @@ function App() {
           <CardContent className="space-y-6">
             {/* Username Input */}
             <div className="space-y-2">
-              <Label htmlFor="username">Nume utilizator TikTok</Label>
+              <Label htmlFor="username">Utilizator sau Link TikTok</Label>
               <div className="flex gap-2">
                 <span className="flex items-center px-3 bg-slate-100 border border-r-0 rounded-l-md text-slate-600">
                   @
                 </span>
                 <Input
                   id="username"
-                  placeholder="nume_utilizator"
+                  placeholder="nume_utilizator sau link către profil"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   className="rounded-l-none"
@@ -369,6 +382,18 @@ function App() {
                       selected={dateRange.from}
                       onSelect={(date) => setDateRange(prev => ({ ...prev, from: date }))}
                       initialFocus
+                      locale={ro}
+                      className="rounded-md border bg-white shadow-sm [--cell-size:--spacing(9)]"
+                      classNames={{
+                        months: "gap-2",
+                        month: "gap-2",
+                        caption_label: "text-sm font-semibold",
+                        weekdays: "mb-1",
+                        weekday: "uppercase text-[0.7rem] text-slate-500 tracking-wide",
+                        week: "mt-1",
+                        day: "text-sm",
+                        today: "bg-slate-100 text-slate-900 rounded-md",
+                      }}
                     />
                   </PopoverContent>
                 </Popover>
@@ -392,6 +417,18 @@ function App() {
                       selected={dateRange.to}
                       onSelect={(date) => setDateRange(prev => ({ ...prev, to: date }))}
                       initialFocus
+                      locale={ro}
+                      className="rounded-md border bg-white shadow-sm [--cell-size:--spacing(9)]"
+                      classNames={{
+                        months: "gap-2",
+                        month: "gap-2",
+                        caption_label: "text-sm font-semibold",
+                        weekdays: "mb-1",
+                        weekday: "uppercase text-[0.7rem] text-slate-500 tracking-wide",
+                        week: "mt-1",
+                        day: "text-sm",
+                        today: "bg-slate-100 text-slate-900 rounded-md",
+                      }}
                     />
                   </PopoverContent>
                 </Popover>
