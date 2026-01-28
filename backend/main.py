@@ -361,6 +361,58 @@ def fetch_direct_url_from_item_list(video_url: str) -> str | None:
 
     return None
 
+_GEMINI_MODEL_CACHE: str | None = None
+
+def _resolve_gemini_model(api_key: str, log=None) -> str | None:
+    global _GEMINI_MODEL_CACHE
+    if _GEMINI_MODEL_CACHE:
+        return _GEMINI_MODEL_CACHE
+
+    env_model = os.environ.get("GEMINI_MODEL")
+    if env_model:
+        _GEMINI_MODEL_CACHE = env_model
+        return env_model
+
+    def _log(msg: str):
+        if callable(log):
+            try:
+                log(msg)
+            except Exception:
+                pass
+
+    try:
+        resp = requests.get(
+            f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
+            timeout=15,
+        )
+        if not resp.ok:
+            _log(f"Gemini ListModels HTTP {resp.status_code}: {resp.text[:200]}")
+            return None
+        data = resp.json()
+        models = [m.get("name", "") for m in (data.get("models") or []) if m.get("name")]
+        _log(f"Gemini ListModels count={len(models)}")
+
+        # Prefer flash > pro > legacy if available
+        preferred = [
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-pro",
+            "models/gemini-1.0-pro",
+        ]
+        for pref in preferred:
+            if pref in models:
+                _GEMINI_MODEL_CACHE = pref.replace("models/", "")
+                return _GEMINI_MODEL_CACHE
+
+        if models:
+            # Fallback to the first available model
+            _GEMINI_MODEL_CACHE = models[0].replace("models/", "")
+            return _GEMINI_MODEL_CACHE
+    except Exception as exc:
+        _log(f"Gemini ListModels exception: {exc}")
+        return None
+
+    return None
+
 def extract_url_with_gemini(html: str, log=None) -> str | None:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key or not html:
@@ -373,7 +425,10 @@ def extract_url_with_gemini(html: str, log=None) -> str | None:
             except Exception:
                 pass
 
-    gemini_model = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash-002")
+    gemini_model = _resolve_gemini_model(api_key, log=_log)
+    if not gemini_model:
+        _log("Gemini model resolution failed")
+        return None
     endpoint = (
         "https://generativelanguage.googleapis.com/v1beta/"
         f"models/{gemini_model}:generateContent"
