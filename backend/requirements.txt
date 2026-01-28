@@ -1,0 +1,8 @@
+flask
+flask-cors
+yt-dlp
+openai-whisper
+setuptools-rust
+torch
+torchvision
+torchaudio
