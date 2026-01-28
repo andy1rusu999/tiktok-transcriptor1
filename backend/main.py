@@ -544,6 +544,52 @@ def find_item_struct(payload: object) -> dict | None:
     return None
 
 def extract_url_from_html(html: str) -> str | None:
+    def find_direct_url(obj) -> str | None:
+        # Recursively search for playAddr/downloadAddr/urlList fields that contain mp4 URLs
+        if isinstance(obj, dict):
+            # direct video info case
+            if "playAddr" in obj or "downloadAddr" in obj:
+                play_addr = obj.get("playAddr") or obj.get("play_addr") or {}
+                download_addr = obj.get("downloadAddr") or obj.get("download_addr") or {}
+                for addr in (play_addr, download_addr):
+                    if isinstance(addr, dict):
+                        url_list = addr.get("urlList") or addr.get("url_list") or []
+                        for u in url_list:
+                            if isinstance(u, str) and u.startswith("http") and ("video_mp4" in u or ".mp4" in u):
+                                return u
+            # generic urlList case
+            if "urlList" in obj or "url_list" in obj:
+                url_list = obj.get("urlList") or obj.get("url_list") or []
+                for u in url_list:
+                    if isinstance(u, str) and u.startswith("http") and ("video_mp4" in u or ".mp4" in u):
+                        return u
+
+            for v in obj.values():
+                found = find_direct_url(v)
+                if found:
+                    return found
+        elif isinstance(obj, list):
+            for v in obj:
+                found = find_direct_url(v)
+                if found:
+                    return found
+        return None
+
+    # Common on modern TikTok pages
+    next_match = re.search(
+        r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>',
+        html,
+        re.DOTALL
+    )
+    if next_match:
+        try:
+            data = json.loads(next_match.group(1))
+            found = find_direct_url(data)
+            if found:
+                return found
+        except Exception:
+            pass
+
     sigi_match = re.search(r'id="SIGI_STATE"[^>]*>(.*?)</script>', html, re.DOTALL)
     if sigi_match:
         try:
@@ -590,11 +636,12 @@ def extract_url_from_html(html: str) -> str | None:
             return raw
     return None
 
-def download_media_url(media_url: str, target_path: str) -> bool:
+def download_media_url(media_url: str, target_path: str, referer: str | None = None) -> bool:
     cookies = load_cookie_jar()
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://www.tiktok.com/',
+        # TikTok is strict about Referer; use the actual video URL when available
+        'Referer': referer or 'https://www.tiktok.com/',
     }
     try:
         with requests.get(media_url, headers=headers, cookies=cookies, stream=True, timeout=30) as response:
@@ -841,7 +888,7 @@ def transcribe():
                 return jsonify({"error": "Nu am putut obține URL-ul direct pentru acest clip."}), 500
 
             video_path = os.path.join(tmpdir, 'video.mp4')
-            if not download_media_url(direct_url, video_path):
+            if not download_media_url(direct_url, video_path, referer=video_url):
                 return jsonify({"error": "Nu am putut descărca video-ul."}), 500
 
             # 3. Extract audio using ffmpeg
