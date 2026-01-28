@@ -129,6 +129,21 @@ def try_fetch_subtitles(video_url: str, language: str | None) -> str | None:
     text = extract_subtitle_text(raw, ext)
     return text or None
 
+def extract_video_date(info: dict) -> datetime | None:
+    upload_date_str = info.get('upload_date')
+    if upload_date_str:
+        try:
+            return datetime.strptime(upload_date_str, '%Y%m%d').replace(tzinfo=None)
+        except Exception as exc:
+            print(f"Error parsing date {upload_date_str}: {exc}")
+    timestamp = info.get('timestamp') or info.get('release_timestamp')
+    if timestamp:
+        try:
+            return datetime.fromtimestamp(int(timestamp)).replace(tzinfo=None)
+        except Exception as exc:
+            print(f"Error parsing timestamp {timestamp}: {exc}")
+    return None
+
 @app.route('/api/fetch-videos', methods=['POST'])
 @app.route('/fetch-videos', methods=['POST'])
 def fetch_videos():
@@ -186,20 +201,22 @@ def fetch_videos():
             for entry in result.get('entries', []):
                 if not entry:
                     continue
-                    
-                upload_date_str = entry.get('upload_date')
-                video_date = None
-                
-                if upload_date_str:
-                    try:
-                        video_date = datetime.strptime(upload_date_str, '%Y%m%d').replace(tzinfo=None)
-                    except Exception as e:
-                        print(f"Error parsing date {upload_date_str}: {e}")
-                        video_date = None
+                video_date = extract_video_date(entry)
 
                 if start_day or end_day:
                     if not video_date:
-                        continue
+                        entry_url = entry.get('url')
+                        if entry_url and not entry_url.startswith('http'):
+                            entry_url = f"https://www.tiktok.com/@{username}/video/{entry_url}"
+                        if entry_url:
+                            try:
+                                details = ydl.extract_info(entry_url, download=False)
+                                video_date = extract_video_date(details)
+                            except Exception as exc:
+                                print(f"Error fetching details for {entry_url}: {exc}")
+                                video_date = None
+                        if not video_date:
+                            continue
                     video_day = video_date.date()
                     if start_day and video_day < start_day:
                         continue
