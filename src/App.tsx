@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   Calendar as CalendarIcon, 
   Mic, 
@@ -40,6 +41,8 @@ interface VideoData {
   duration: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
   transcription?: string;
+  subtitles?: string;
+  subtitlesStatus?: 'idle' | 'loading' | 'completed' | 'error';
   language: string;
 }
 
@@ -109,6 +112,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [overallProgress, setOverallProgress] = useState(0);
+  const [activeTabById, setActiveTabById] = useState<Record<string, 'transcription' | 'subtitles'>>({});
 
   // Încărcare videoclipuri din perioada selectată via backend
   const fetchVideos = async () => {
@@ -331,6 +335,56 @@ function App() {
     setVideos(prev => prev.filter(v => v.id !== videoId));
     updateOverallProgress();
     toast.success('Videoclip eliminat');
+  };
+
+  const fetchSubtitles = async (videoId: string) => {
+    const video = videos.find(v => v.id === videoId);
+    if (!video || !video.url) return;
+
+    setVideos(prev => prev.map(v =>
+      v.id === videoId ? { ...v, subtitlesStatus: 'loading' } : v
+    ));
+
+    try {
+      const payload: Record<string, string> = { video_url: video.url };
+      if (selectedLanguage !== 'auto') {
+        payload.language = selectedLanguage;
+      }
+      const response = await fetch(`${apiBase}/subtitles`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const responseText = await response.text();
+      let data: any;
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw new Error(`Răspuns invalid de la server: ${responseText.slice(0, 200)}`);
+      }
+
+      if (!response.ok || data.error) {
+        const serverError = data?.error || `Eroare server: ${response.status}`;
+        toast.error(`Eroare la subtitrări: ${serverError}`);
+        setVideos(prev => prev.map(v =>
+          v.id === videoId ? { ...v, subtitlesStatus: 'error' } : v
+        ));
+        return;
+      }
+
+      setVideos(prev => prev.map(v =>
+        v.id === videoId ? { ...v, subtitles: data.subtitles, subtitlesStatus: 'completed' } : v
+      ));
+    } catch (error: any) {
+      const message = error?.message || 'Eroare de conexiune la serverul de subtitrări.';
+      toast.error(message);
+      setVideos(prev => prev.map(v =>
+        v.id === videoId ? { ...v, subtitlesStatus: 'error' } : v
+      ));
+    }
   };
 
   const getStatusIcon = (status: VideoData['status']) => {
@@ -600,7 +654,7 @@ function App() {
                               return (
                                 <span className="flex items-center gap-1">
                                   <Clock className="h-4 w-4" />
-                                  Durata: {durationInfo.clock} ({durationInfo.label}, {durationInfo.seconds}s)
+                                  Durata: {durationInfo.clock} • {durationInfo.label}
                                 </span>
                               );
                             })()}
@@ -613,14 +667,38 @@ function App() {
                             </span>
                           </div>
                           
-                          {/* Transcription Display */}
-                          {video.transcription && (
-                            <div className="mt-3 p-3 bg-white border rounded-md">
-                              <p className="text-sm text-slate-700 whitespace-pre-wrap">
-                                {video.transcription}
-                              </p>
-                            </div>
-                          )}
+                          <Tabs
+                            value={activeTabById[video.id] || 'transcription'}
+                            onValueChange={(value) => {
+                              const tab = value as 'transcription' | 'subtitles';
+                              setActiveTabById(prev => ({ ...prev, [video.id]: tab }));
+                              if (tab === 'subtitles' && !video.subtitles && video.subtitlesStatus !== 'loading') {
+                                fetchSubtitles(video.id);
+                              }
+                            }}
+                            className="mt-3"
+                          >
+                            <TabsList>
+                              <TabsTrigger value="transcription">Transcriere</TabsTrigger>
+                              <TabsTrigger value="subtitles">Subtitrări</TabsTrigger>
+                            </TabsList>
+                            <TabsContent value="transcription" className="mt-3">
+                              <div className="p-3 bg-white border rounded-md">
+                                <p className="text-sm text-slate-700 whitespace-pre-wrap">
+                                  {video.transcription || 'Transcrierea nu este disponibilă încă.'}
+                                </p>
+                              </div>
+                            </TabsContent>
+                            <TabsContent value="subtitles" className="mt-3">
+                              <div className="p-3 bg-white border rounded-md">
+                                <p className="text-sm text-slate-700 whitespace-pre-wrap">
+                                  {video.subtitlesStatus === 'loading'
+                                    ? 'Se încarcă subtitrările...'
+                                    : video.subtitles || 'Subtitrări indisponibile pentru acest clip.'}
+                                </p>
+                              </div>
+                            </TabsContent>
+                          </Tabs>
                         </div>
 
                         <div className="flex items-center gap-2 ml-4">

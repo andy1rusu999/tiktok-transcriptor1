@@ -263,26 +263,11 @@ def transcribe():
         return jsonify({"error": "Video URL is required"}), 400
 
     try:
-        # 1. Try extracting subtitles if available
-        try:
-            subtitle_text = try_fetch_subtitles(video_url, language if language != 'auto' else None)
-        except Exception as exc:
-            print(f"Subtitle extraction error for {video_url}: {exc}")
-            subtitle_text = None
-        if subtitle_text:
-            if language == 'ro-md':
-                subtitle_text = apply_moldovan_slang(subtitle_text)
-            return jsonify({
-                "transcription": subtitle_text,
-                "status": "completed",
-                "source": "subtitles"
-            })
-
-        # 2. Create a temporary directory to store the audio file
+        # 1. Create a temporary directory to store the audio file
         with tempfile.TemporaryDirectory() as tmpdir:
             audio_path = os.path.join(tmpdir, 'audio')
             
-            # 3. Download audio using yt-dlp
+            # 2. Download audio using yt-dlp
             ydl_opts = {
                 'format': 'bestaudio/best',
                 'outtmpl': audio_path,
@@ -316,7 +301,7 @@ def transcribe():
             if os.path.getsize(full_audio_path) == 0:
                 return jsonify({"error": "Downloaded audio is empty"}), 500
 
-            # 4. Transcribe using Whisper
+            # 3. Transcribe using Whisper
             # Map languages if needed (OpenAI Whisper handles 'ro', 'ru' etc.)
             transcribe_opts = {}
             if language and language != 'auto':
@@ -338,6 +323,29 @@ def transcribe():
                 "status": "completed"
             })
 
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/api/subtitles', methods=['POST'])
+@app.route('/subtitles', methods=['POST'])
+def subtitles():
+    data = request.json
+    video_url = data.get('video_url')
+    language = data.get('language')
+
+    if not video_url:
+        return jsonify({"error": "Video URL is required"}), 400
+
+    try:
+        subtitle_text = try_fetch_subtitles(video_url, language if language != 'auto' else None)
+        if not subtitle_text:
+            return jsonify({"error": "Nu au fost găsite subtitrări pentru acest clip."}), 404
+        if language == 'ro-md':
+            subtitle_text = apply_moldovan_slang(subtitle_text)
+        return jsonify({
+            "subtitles": subtitle_text,
+            "status": "completed"
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
