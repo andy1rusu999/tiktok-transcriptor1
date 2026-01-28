@@ -152,6 +152,9 @@ def fetch_profile_html(username: str, cookies: dict) -> str | None:
 def resolve_secuid(username: str, cookies: dict) -> str | None:
     if username.startswith("tiktokuser:"):
         return username.split(":", 1)[1]
+    api_secuid = fetch_secuid_from_api(username, cookies)
+    if api_secuid:
+        return api_secuid
     html = fetch_profile_html(username, cookies)
     if not html:
         return None
@@ -159,6 +162,34 @@ def resolve_secuid(username: str, cookies: dict) -> str | None:
     if match:
         return match.group(1)
     return None
+
+def fetch_secuid_from_api(username: str, cookies: dict) -> str | None:
+    ms_token = cookies.get("msToken")
+    params = {
+        "uniqueId": username,
+        "language": "en",
+        "aid": "1988",
+    }
+    if ms_token:
+        params["msToken"] = ms_token
+    url = "https://www.tiktok.com/api/user/detail/?" + urllib.parse.urlencode(params)
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': f"https://www.tiktok.com/@{username}",
+    }
+    cookie_header = build_cookie_header(cookies)
+    if cookie_header:
+        headers['Cookie'] = cookie_header
+    try:
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = response.read().decode("utf-8", errors="ignore")
+        data = json.loads(payload)
+        return data.get("userInfo", {}).get("user", {}).get("secUid")
+    except Exception as exc:
+        print(f"Failed to fetch secUid via API: {exc}")
+        return None
 
 def fetch_videos_via_api(username: str, start_day, end_day):
     # Fallback using yt-dlp binary for listing
@@ -498,18 +529,20 @@ def fetch_videos():
     start_day = start_date.date() if start_date else None
     end_day = end_date.date() if end_date else None
 
+    videos = fetch_videos_via_api(username, start_day, end_day)
+    if videos:
+        return jsonify({"videos": videos})
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             result = ydl.extract_info(tiktok_url, download=False)
     except Exception as exc:
         print(f"yt-dlp user extraction failed: {exc}")
-        videos = fetch_videos_via_api(username, start_day, end_day)
-        return jsonify({"videos": videos})
+        return jsonify({"videos": []})
 
     entries = result.get('entries') if isinstance(result, dict) else None
     if not entries:
-        videos = fetch_videos_via_api(username, start_day, end_day)
-        return jsonify({"videos": videos})
+        return jsonify({"videos": []})
 
     videos = []
     for entry in entries:
@@ -534,9 +567,6 @@ def fetch_videos():
             "duration": str(entry.get('duration', '0:00')),
             "status": "pending"
         })
-
-    if not videos:
-        videos = fetch_videos_via_api(username, start_day, end_day)
 
     return jsonify({"videos": videos})
 
