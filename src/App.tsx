@@ -574,11 +574,11 @@ function App() {
           </Card>
         ) : (
           <>
-            <div className="absolute top-4 right-4">
+            <div className="absolute top-3 right-3 z-10">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="rounded-full h-14 w-14">
-                    <UserCircle2 className="h-10 w-10" />
+                  <Button variant="ghost" className="rounded-full h-16 w-16">
+                    <UserCircle2 className="h-11 w-11" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
