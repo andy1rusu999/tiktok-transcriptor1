@@ -523,7 +523,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-6">
-      <div className="max-w-6xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6 relative">
         {/* Header */}
         <div className="text-center space-y-2">
           <h1 className="text-4xl font-bold text-slate-900 flex items-center justify-center gap-3">
@@ -574,11 +574,11 @@ function App() {
           </Card>
         ) : (
           <>
-            <div className="flex items-center justify-end">
+            <div className="absolute top-4 right-4">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="rounded-full h-12 w-12">
-                    <UserCircle2 className="h-8 w-8" />
+                  <Button variant="ghost" className="rounded-full h-14 w-14">
+                    <UserCircle2 className="h-10 w-10" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -639,10 +639,10 @@ function App() {
         {/* Configuration Card */}
         <Card className="shadow-lg">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <User className="h-5 w-5" />
-              Configurare Cont
-            </CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <User className="h-5 w-5" />
+                Analiză cont
+              </CardTitle>
             <CardDescription>
               Introdu datele contului TikTok și selectează perioada pentru transcriere
             </CardDescription>
