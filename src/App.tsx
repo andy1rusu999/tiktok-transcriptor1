@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,19 +11,6 @@ import { Progress } from '@/components/ui/progress';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { 
   Calendar as CalendarIcon, 
   Mic, 
@@ -59,11 +46,6 @@ interface VideoData {
   subtitles?: string;
   subtitlesStatus?: 'idle' | 'loading' | 'completed' | 'error';
   language: string;
-}
-
-interface AuthUser {
-  username: string;
-  role: 'admin' | 'user';
 }
 
 const languages = [
@@ -133,28 +115,6 @@ function App() {
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [overallProgress, setOverallProgress] = useState(0);
   const [activeTabById, setActiveTabById] = useState<Record<string, 'transcription' | 'subtitles'>>({});
-  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-  const [loginUsername, setLoginUsername] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [newUserUsername, setNewUserUsername] = useState('');
-  const [newUserPassword, setNewUserPassword] = useState('');
-  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
-
-  useEffect(() => {
-    const loadAuth = async () => {
-      try {
-        const response = await fetch(`${apiBase}/me`, { credentials: 'include' });
-        const data = await response.json();
-        setAuthUser(data?.user || null);
-      } catch {
-        setAuthUser(null);
-      } finally {
-        setAuthLoading(false);
-      }
-    };
-    loadAuth();
-  }, []);
 
   // Încărcare videoclipuri din perioada selectată via backend
   const fetchVideos = async () => {
@@ -188,7 +148,6 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
         body: JSON.stringify({
           username: cleanUsername,
           start_date: dateRange.from.toISOString(),
@@ -260,7 +219,6 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
         body: JSON.stringify(payload),
       });
 
@@ -384,65 +342,6 @@ function App() {
     toast.success('Videoclip eliminat');
   };
 
-  const handleLogin = async () => {
-    if (!loginUsername || !loginPassword) {
-      toast.error('Introduceți utilizator și parolă.');
-      return;
-    }
-    try {
-      const response = await fetch(`${apiBase}/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify({ username: loginUsername, password: loginPassword }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.error || 'Autentificare eșuată.');
-      }
-      setAuthUser(data.user);
-      setLoginPassword('');
-      toast.success('Autentificat cu succes.');
-    } catch (error: any) {
-      toast.error(error?.message || 'Autentificare eșuată.');
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await fetch(`${apiBase}/logout`, { method: 'POST', credentials: 'include' });
-    } finally {
-      setAuthUser(null);
-      setVideos([]);
-      toast.info('Ai ieșit din cont.');
-    }
-  };
-
-  const handleCreateUser = async () => {
-    if (!newUserUsername || !newUserPassword) {
-      toast.error('Completează utilizatorul și parola.');
-      return;
-    }
-    try {
-      const response = await fetch(`${apiBase}/users`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ username: newUserUsername, password: newUserPassword }),
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.error || 'Nu am putut crea utilizatorul.');
-      }
-      toast.success('Utilizator creat.');
-      setNewUserUsername('');
-      setNewUserPassword('');
-    } catch (error: any) {
-      toast.error(error?.message || 'Nu am putut crea utilizatorul.');
-    }
-  };
 
   const fetchSubtitles = async (videoId: string) => {
     const video = videos.find(v => v.id === videoId);
@@ -462,7 +361,6 @@ function App() {
         headers: {
           'Content-Type': 'application/json',
         },
-        credentials: 'include',
         body: JSON.stringify(payload),
       });
 
@@ -532,106 +430,10 @@ function App() {
               TikTok Audio Transcriber
             </h1>
           </div>
-          {authUser && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="rounded-full h-16 w-16 p-0">
-                  <UserCircle2 className="h-12 w-12" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <div className="px-3 py-2 text-xs text-slate-500">
-                  Conectat ca <strong>{authUser.username}</strong>
-                </div>
-                {authUser.role === 'admin' && (
-                  <DropdownMenuItem onClick={() => setIsUserDialogOpen(true)}>
-                    Adaugă utilizator
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem onClick={handleLogout}>
-                  Delogare
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+          <Button variant="ghost" className="rounded-full h-16 w-16 p-0">
+            <UserCircle2 className="h-12 w-12" />
+          </Button>
         </div>
-
-        {authLoading ? (
-          <Card className="shadow-lg">
-            <CardContent className="p-8 text-center text-slate-600">
-              Se verifică autentificarea...
-            </CardContent>
-          </Card>
-        ) : !authUser ? (
-          <Card className="shadow-lg max-w-lg mx-auto">
-            <CardHeader>
-              <CardTitle>Autentificare</CardTitle>
-              <CardDescription>Acces privat. Introdu credențialele.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="login-username">Utilizator</Label>
-                <Input
-                  id="login-username"
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  placeholder="admin"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="login-password">Parolă</Label>
-                <Input
-                  id="login-password"
-                  type="password"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder="••••••••"
-                />
-              </div>
-              <Button
-                className="w-full bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-600 hover:to-purple-700"
-                onClick={handleLogin}
-              >
-                Autentificare
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            <Dialog open={isUserDialogOpen} onOpenChange={setIsUserDialogOpen}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Adaugă utilizator</DialogTitle>
-                  <DialogDescription>
-                    Doar adminul poate crea conturi noi.
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="new-username">Utilizator nou</Label>
-                    <Input
-                      id="new-username"
-                      value={newUserUsername}
-                      onChange={(e) => setNewUserUsername(e.target.value)}
-                      placeholder="utilizator"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="new-password">Parolă</Label>
-                    <Input
-                      id="new-password"
-                      type="password"
-                      value={newUserPassword}
-                      onChange={(e) => setNewUserPassword(e.target.value)}
-                      placeholder="parolă"
-                    />
-                  </div>
-                  <Button onClick={handleCreateUser} className="w-full">
-                    Adaugă utilizator
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
 
         {/* Configuration Card */}
         <Card className="shadow-lg">
@@ -955,9 +757,6 @@ function App() {
               </ScrollArea>
             </CardContent>
           </Card>
-        )}
-
-          </>
         )}
 
       </div>

@@ -1,8 +1,6 @@
-import hashlib
 import json
 import os
 import re
-import secrets
 import subprocess
 import sys
 import tempfile
@@ -11,25 +9,16 @@ import urllib.request
 from pathlib import Path
 import whisper
 import yt_dlp
-from flask import Flask, request, jsonify, send_from_directory, session
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from datetime import datetime
 
 dist_dir = Path(__file__).resolve().parent.parent / "dist"
 app = Flask(__name__, static_folder=str(dist_dir), static_url_path="/")
 
-app.secret_key = os.environ.get("APP_SECRET") or secrets.token_hex(32)
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get("COOKIE_SECURE") == "1"
-
 cors_origins = os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
 cors_list = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
-CORS(app, resources={r"/api/*": {"origins": cors_list}}, supports_credentials=True)
-
-users_file = Path(__file__).resolve().parent / "users.json"
-DEFAULT_ADMIN_USERNAME = "admin"
-DEFAULT_ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "moldova2019")
+CORS(app, resources={r"/api/*": {"origins": cors_list}})
 
 # Load Whisper model globally to avoid reloading on every request
 # Using 'base' for a good balance between speed and accuracy
@@ -65,65 +54,6 @@ def get_cookiefile():
         return cookiefile
     return None
 
-def hash_password(password: str, salt: str | None = None) -> dict:
-    if salt is None:
-        salt = secrets.token_hex(16)
-    hashed = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt.encode('utf-8'),
-        120000,
-    ).hex()
-    return {"salt": salt, "hash": hashed}
-
-def verify_password(password: str, salt: str, hashed: str) -> bool:
-    computed = hashlib.pbkdf2_hmac(
-        'sha256',
-        password.encode('utf-8'),
-        salt.encode('utf-8'),
-        120000,
-    ).hex()
-    return secrets.compare_digest(computed, hashed)
-
-def load_users():
-    if users_file.exists():
-        try:
-            return json.loads(users_file.read_text(encoding="utf-8"))
-        except Exception as exc:
-            print(f"Failed to read users file: {exc}")
-    return {"users": []}
-
-def save_users(data: dict):
-    users_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-def ensure_admin_user():
-    data = load_users()
-    if not data.get("users"):
-        data["users"] = []
-    if any(user.get("username") == DEFAULT_ADMIN_USERNAME for user in data["users"]):
-        return
-    admin_record = {
-        "username": DEFAULT_ADMIN_USERNAME,
-        "role": "admin",
-        **hash_password(DEFAULT_ADMIN_PASSWORD),
-    }
-    data["users"].append(admin_record)
-    save_users(data)
-
-ensure_admin_user()
-
-def require_auth():
-    if not session.get("user"):
-        return jsonify({"error": "Authentication required"}), 401
-    return None
-
-def require_admin():
-    user = session.get("user")
-    if not user:
-        return jsonify({"error": "Authentication required"}), 401
-    if user.get("role") != "admin":
-        return jsonify({"error": "Admin access required"}), 403
-    return None
 
 def load_cookie_jar():
     cookiefile = get_cookiefile()
@@ -444,9 +374,6 @@ def extract_video_date(info: dict) -> datetime | None:
 @app.route('/api/fetch-videos', methods=['POST'])
 @app.route('/fetch-videos', methods=['POST'])
 def fetch_videos():
-    auth_error = require_auth()
-    if auth_error:
-        return auth_error
     data = request.json
     username = data.get('username')
     start_date_str = data.get('start_date')  # Format: ISO or YYYY-MM-DD
@@ -543,9 +470,6 @@ def health():
 @app.route('/api/transcribe', methods=['POST'])
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
-    auth_error = require_auth()
-    if auth_error:
-        return auth_error
     data = request.json
     video_url = data.get('video_url')
     direct_url = data.get('direct_url')
@@ -636,9 +560,6 @@ def transcribe():
 @app.route('/api/subtitles', methods=['POST'])
 @app.route('/subtitles', methods=['POST'])
 def subtitles():
-    auth_error = require_auth()
-    if auth_error:
-        return auth_error
     data = request.json
     video_url = data.get('video_url')
     language = data.get('language')
@@ -659,62 +580,6 @@ def subtitles():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/login', methods=['POST'])
-@app.route('/login', methods=['POST'])
-def login():
-    data = request.json or {}
-    username = data.get("username", "").strip()
-    password = data.get("password", "")
-    if not username or not password:
-        return jsonify({"error": "Username and password are required"}), 400
-
-    users_data = load_users()
-    user = next((u for u in users_data.get("users", []) if u.get("username") == username), None)
-    if not user:
-        return jsonify({"error": "Invalid credentials"}), 401
-    if not verify_password(password, user.get("salt", ""), user.get("hash", "")):
-        return jsonify({"error": "Invalid credentials"}), 401
-
-    session["user"] = {"username": user["username"], "role": user.get("role", "user")}
-    return jsonify({"status": "ok", "user": session["user"]})
-
-@app.route('/api/logout', methods=['POST'])
-@app.route('/logout', methods=['POST'])
-def logout():
-    session.pop("user", None)
-    return jsonify({"status": "ok"})
-
-@app.route('/api/me', methods=['GET'])
-@app.route('/me', methods=['GET'])
-def me():
-    user = session.get("user")
-    if not user:
-        return jsonify({"user": None}), 200
-    return jsonify({"user": user}), 200
-
-@app.route('/api/users', methods=['POST'])
-@app.route('/users', methods=['POST'])
-def create_user():
-    admin_error = require_admin()
-    if admin_error:
-        return admin_error
-    data = request.json or {}
-    username = data.get("username", "").strip()
-    password = data.get("password", "")
-    if not username or not password:
-        return jsonify({"error": "Username and password are required"}), 400
-
-    users_data = load_users()
-    if any(u.get("username") == username for u in users_data.get("users", [])):
-        return jsonify({"error": "User already exists"}), 400
-
-    users_data["users"].append({
-        "username": username,
-        "role": "user",
-        **hash_password(password),
-    })
-    save_users(users_data)
-    return jsonify({"status": "created"})
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
