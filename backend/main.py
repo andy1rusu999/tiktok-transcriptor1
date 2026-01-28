@@ -361,11 +361,21 @@ def fetch_direct_url_from_item_list(video_url: str) -> str | None:
     return None
 
 def fetch_direct_url(video_url: str) -> str | None:
+    debug_log = Path("/tmp/tiktok_debug.log")
+    
+    def log(msg):
+        with open(debug_log, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.now().isoformat()} {msg}\n")
+    
+    log(f"=== fetch_direct_url for {video_url}")
     video_id = extract_video_id(video_url)
     if not video_id:
+        log("No video_id extracted")
         return None
 
     cookies = load_cookie_jar()
+    log(f"Cookies loaded: {len(cookies)} items, msToken={'yes' if cookies.get('msToken') else 'no'}")
+    
     ms_token = cookies.get("msToken")
     params = {
         "aid": "1988",
@@ -389,12 +399,20 @@ def fetch_direct_url(video_url: str) -> str | None:
 
     try:
         response = requests.get(url, headers=headers, cookies=cookies, timeout=20)
+        log(f"item/detail status: {response.status_code}")
         if not response.ok:
-            print(f"Direct URL API status {response.status_code}: {response.text[:200]}")
+            log(f"Response text: {response.text[:300]}")
+            log("Trying item_list fallback immediately")
+            direct_from_list = fetch_direct_url_from_item_list(video_url)
+            if direct_from_list:
+                log(f"item_list fallback SUCCESS: {direct_from_list[:80]}")
+                return direct_from_list
+            log("item_list fallback FAILED")
             return None
         data = response.json()
+        log(f"Response keys: {list(data.keys())}")
     except Exception as exc:
-        print(f"Failed to fetch direct URL for {video_id}: {exc}")
+        log(f"Exception: {exc}")
         return None
 
     item = data.get("itemInfo", {}).get("itemStruct")
@@ -407,16 +425,27 @@ def fetch_direct_url(video_url: str) -> str | None:
         if isinstance(addr, dict):
             url_list = addr.get("urlList") or addr.get("url_list") or []
             if url_list:
+                log(f"Found directUrl in item/detail: {url_list[0][:80]}")
                 return url_list[0]
-    print("Direct URL not found in item/detail; trying item_list fallback.")
+    
+    log("Direct URL not found in item/detail; trying item_list fallback.")
     direct_from_list = fetch_direct_url_from_item_list(video_url)
     if direct_from_list:
+        log(f"item_list fallback SUCCESS: {direct_from_list[:80]}")
         return direct_from_list
+    
+    log("item_list fallback FAILED, trying HTML parse")
     # Fallback: parse video page HTML for direct URL
     html = fetch_video_html(video_url, cookies)
     if not html:
+        log("No HTML fetched")
         return None
-    return extract_url_from_html(html)
+    direct_from_html = extract_url_from_html(html)
+    if direct_from_html:
+        log(f"HTML parse SUCCESS: {direct_from_html[:80]}")
+    else:
+        log("HTML parse FAILED")
+    return direct_from_html
 
 def build_video_html_candidates(video_url: str) -> list[str]:
     candidates = [video_url]
