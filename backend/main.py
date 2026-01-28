@@ -295,7 +295,7 @@ def fetch_direct_url(video_url: str) -> str | None:
 
     item = data.get("itemInfo", {}).get("itemStruct")
     if not item:
-        return None
+        item = {}
     video_info = item.get("video", {}) or {}
     play_addr = video_info.get("playAddr") or video_info.get("play_addr") or {}
     download_addr = video_info.get("downloadAddr") or video_info.get("download_addr") or {}
@@ -304,6 +304,47 @@ def fetch_direct_url(video_url: str) -> str | None:
             url_list = addr.get("urlList") or addr.get("url_list") or []
             if url_list:
                 return url_list[0]
+    # Fallback: parse video page HTML for direct URL
+    html = fetch_video_html(video_url, cookies)
+    if not html:
+        return None
+    return extract_url_from_html(html)
+
+def fetch_video_html(video_url: str, cookies: dict) -> str | None:
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://www.tiktok.com/',
+    }
+    cookie_header = build_cookie_header(cookies)
+    if cookie_header:
+        headers['Cookie'] = cookie_header
+    try:
+        request = urllib.request.Request(video_url, headers=headers)
+        with urllib.request.urlopen(request, timeout=20) as response:
+            return response.read().decode("utf-8", errors="ignore")
+    except Exception as exc:
+        print(f"Failed to fetch video HTML: {exc}")
+        return None
+
+def extract_url_from_html(html: str) -> str | None:
+    candidates = [
+        r'"playAddr":"(.*?)"',
+        r'"downloadAddr":"(.*?)"',
+        r'"playAddr"\s*:\s*\{"urlList":\["(.*?)"',
+        r'"downloadAddr"\s*:\s*\{"urlList":\["(.*?)"',
+    ]
+    for pattern in candidates:
+        match = re.search(pattern, html)
+        if not match:
+            continue
+        raw = match.group(1)
+        try:
+            decoded = json.loads(f"\"{raw}\"")
+            return decoded
+        except Exception:
+            return raw
     return None
 
 def download_media_url(media_url: str, target_path: str) -> bool:
