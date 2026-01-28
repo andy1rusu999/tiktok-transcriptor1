@@ -325,9 +325,6 @@ function App() {
             <Mic className="h-10 w-10 text-pink-500" />
             TikTok Audio Transcriber
           </h1>
-          <p className="text-slate-600 text-lg">
-            Transcrie automat clipurile audio de pe TikTok în limba rusă, română sau română cu slang moldovenesc
-          </p>
         </div>
 
         {/* Configuration Card */}
@@ -483,7 +480,7 @@ function App() {
         </Card>
 
         {/* Progress Overview */}
-        {videos.length > 0 && (
+        {(isLoading || videos.length > 0) && (
           <Card className="shadow-lg">
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
@@ -497,7 +494,10 @@ function App() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <Progress value={overallProgress} className="h-3" />
+              <Progress
+                value={isLoading && videos.length === 0 ? 20 : overallProgress}
+                className={cn("h-3", isLoading && "animate-pulse")}
+              />
               <div className="flex justify-between mt-2 text-sm text-slate-600">
                 <span>{videos.filter(v => v.status === 'completed').length} finalizate</span>
                 <span>{videos.filter(v => v.status === 'pending').length} în așteptare</span>
@@ -622,36 +622,6 @@ function App() {
           </Card>
         )}
 
-        {/* Info Card */}
-        <Card className="shadow-lg bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200">
-          <CardContent className="p-6">
-            <div className="flex items-start gap-4">
-              <div className="p-3 bg-blue-100 rounded-full">
-                <Languages className="h-6 w-6 text-blue-600" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-blue-900">Suport Multi-Limbă</h3>
-                <p className="text-blue-700 mt-1">
-                  Aplicația suportă transcrierea în trei variante lingvistice:
-                </p>
-                <ul className="mt-2 space-y-1 text-sm text-blue-600">
-                  <li className="flex items-center gap-2">
-                    <span>🇷🇺</span>
-                    <span><strong>Limba rusă</strong> - transcriere standard</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span>🇷🇴</span>
-                    <span><strong>Limba română</strong> - transcriere standard</span>
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span>🇲🇩</span>
-                    <span><strong>Română (Moldova)</strong> - include suport pentru slang moldovenesc și rusisme</span>
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
     </div>
   );
