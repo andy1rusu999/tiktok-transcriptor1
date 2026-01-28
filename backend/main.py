@@ -341,6 +341,24 @@ def fetch_direct_url(video_url: str) -> str | None:
         return None
     return extract_url_from_html(html)
 
+def build_video_html_candidates(video_url: str) -> list[str]:
+    candidates = [video_url]
+    video_id = extract_video_id(video_url)
+    if video_id:
+        candidates.extend([
+            f"https://www.tiktok.com/embed/v2/{video_id}",
+            f"https://www.tiktok.com/embed/{video_id}",
+            f"https://m.tiktok.com/v/{video_id}.html",
+        ])
+    seen = set()
+    ordered = []
+    for url in candidates:
+        if url in seen:
+            continue
+        seen.add(url)
+        ordered.append(url)
+    return ordered
+
 def fetch_video_html(video_url: str, cookies: dict) -> str | None:
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -348,18 +366,74 @@ def fetch_video_html(video_url: str, cookies: dict) -> str | None:
         'Accept-Language': 'en-US,en;q=0.9',
         'Referer': 'https://www.tiktok.com/',
     }
-    cookie_header = build_cookie_header(cookies)
-    if cookie_header:
-        headers['Cookie'] = cookie_header
-    try:
-        request = urllib.request.Request(video_url, headers=headers)
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return response.read().decode("utf-8", errors="ignore")
-    except Exception as exc:
-        print(f"Failed to fetch video HTML: {exc}")
-        return None
+    last_html = None
+    for url in build_video_html_candidates(video_url):
+        try:
+            response = requests.get(url, headers=headers, cookies=cookies, timeout=20)
+            if response.ok and response.text:
+                last_html = response.text
+                if len(last_html) > 2000:
+                    return last_html
+        except Exception as exc:
+            print(f"Failed to fetch video HTML from {url}: {exc}")
+            continue
+    return last_html
+
+def extract_url_from_item(item: dict) -> str | None:
+    video_info = item.get("video", {}) if isinstance(item, dict) else {}
+    play_addr = video_info.get("playAddr") or video_info.get("play_addr") or {}
+    download_addr = video_info.get("downloadAddr") or video_info.get("download_addr") or {}
+    for addr in (play_addr, download_addr):
+        if isinstance(addr, dict):
+            url_list = addr.get("urlList") or addr.get("url_list") or []
+            if url_list:
+                return url_list[0]
+    return None
+
+def find_item_struct(payload: object) -> dict | None:
+    if isinstance(payload, dict):
+        if isinstance(payload.get("itemStruct"), dict):
+            return payload["itemStruct"]
+        for value in payload.values():
+            found = find_item_struct(value)
+            if found:
+                return found
+    elif isinstance(payload, list):
+        for value in payload:
+            found = find_item_struct(value)
+            if found:
+                return found
+    return None
 
 def extract_url_from_html(html: str) -> str | None:
+    sigi_match = re.search(r'id="SIGI_STATE"[^>]*>(.*?)</script>', html, re.DOTALL)
+    if sigi_match:
+        try:
+            data = json.loads(sigi_match.group(1))
+            item_module = data.get("ItemModule") if isinstance(data, dict) else None
+            if isinstance(item_module, dict):
+                for item in item_module.values():
+                    direct = extract_url_from_item(item)
+                    if direct:
+                        return direct
+        except Exception:
+            pass
+
+    uni_match = re.search(
+        r'__UNIVERSAL_DATA_FOR_REHYDRATION__\s*=\s*({.*?})\s*;</script>',
+        html,
+        re.DOTALL
+    )
+    if uni_match:
+        try:
+            data = json.loads(uni_match.group(1))
+            item_struct = find_item_struct(data)
+            direct = extract_url_from_item(item_struct or {})
+            if direct:
+                return direct
+        except Exception:
+            pass
+
     candidates = [
         r'"playAddr":"(.*?)"',
         r'"downloadAddr":"(.*?)"',
