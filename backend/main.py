@@ -418,13 +418,16 @@ def fetch_direct_url(video_url: str) -> str | None:
     cookiefile = get_cookiefile()
     log(f"Cookies loaded: {len(cookies)} items, msToken={'yes' if cookies.get('msToken') else 'no'}")
     
-    # METODA 1: yt-dlp binary (Cea mai sigură metodă pe server)
-    log("Method 1: Trying yt-dlp binary...")
+    # METODA 1: yt-dlp (din venv). Fără extractor impersonate args:
+    # pe serverul tău impersonation targets sunt "unavailable", iar asta rupe TikTok.
+    log("Method 1: Trying yt-dlp (venv, no impersonate args)...")
     try:
         cmd = [
             sys.executable, "-m", "yt_dlp",
             "--cookies", cookiefile if cookiefile else "/dev/null",
-            "--extractor-args", "tiktok:impersonate=chrome",
+            "--no-warnings",
+            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "--add-header", f"Referer:{video_url}",
             "--get-url",
             video_url
         ]
@@ -434,7 +437,12 @@ def fetch_direct_url(video_url: str) -> str | None:
             if url.startswith("http"):
                 log(f"yt-dlp SUCCESS: {url[:80]}")
                 return url
-        log(f"yt-dlp failed (code {res.returncode}): {res.stderr[:200]}")
+        # IMPORTANT: fără stderr complet vedem doar warning-ul, nu cauza reală
+        log(f"yt-dlp failed (code {res.returncode})")
+        if res.stdout.strip():
+            log(f"yt-dlp stdout (first 500): {res.stdout[:500]}")
+        if res.stderr.strip():
+            log(f"yt-dlp stderr (first 2000): {res.stderr[:2000]}")
     except Exception as e:
         log(f"yt-dlp exception: {e}")
 
@@ -450,7 +458,7 @@ def fetch_direct_url(video_url: str) -> str | None:
     log("Method 3: Fetching HTML for Gemini extraction...")
     html = fetch_video_html(video_url, cookies)
     if html:
-        log(f"HTML fetched, length: {len(html)}. Calling Gemini...")
+        log(f"HTML fetched, length: {len(html)}. Calling Gemini... (key={'yes' if os.environ.get('GEMINI_API_KEY') else 'no'})")
         direct_gemini = extract_url_with_gemini(html)
         if direct_gemini:
             log(f"Gemini extraction SUCCESS: {direct_gemini[:80]}")
