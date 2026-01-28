@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -115,6 +115,15 @@ function App() {
   const [overallProgress, setOverallProgress] = useState(0);
   const [activeTabById, setActiveTabById] = useState<Record<string, 'transcription' | 'subtitles'>>({});
   const runIdRef = useRef(0);
+
+  useEffect(() => {
+    if (videos.length === 0) {
+      setOverallProgress(0);
+      return;
+    }
+    const completed = videos.filter(v => v.status === 'completed').length;
+    setOverallProgress((completed / videos.length) * 100);
+  }, [videos]);
 
   // Încărcare videoclipuri din perioada selectată via backend
   const fetchVideos = async () => {
@@ -258,7 +267,6 @@ function App() {
         } : v
       ));
 
-      updateOverallProgress();
       toast.success('Transcriere finalizată!');
     } catch (error: any) {
       const message = error?.message || 'Eroare de conexiune la serverul de transcriere.';
@@ -288,14 +296,6 @@ function App() {
     }
   };
 
-  const updateOverallProgress = () => {
-    if (videos.length === 0) {
-      setOverallProgress(0);
-      return;
-    }
-    const completed = videos.filter(v => v.status === 'completed').length;
-    setOverallProgress((completed / videos.length) * 100);
-  };
 
   const copyTranscription = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -356,7 +356,6 @@ function App() {
 
   const removeVideo = (videoId: string) => {
     setVideos(prev => prev.filter(v => v.id !== videoId));
-    updateOverallProgress();
     toast.success('Videoclip eliminat');
   };
 
