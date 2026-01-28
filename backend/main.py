@@ -36,7 +36,6 @@ DEFAULT_ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "moldova2019")
 print("Loading Whisper model...")
 model = whisper.load_model("base")
 print("Whisper model loaded.")
-ensure_admin_user()
 
 def apply_moldovan_slang(text: str) -> str:
     if not text:
@@ -110,6 +109,8 @@ def ensure_admin_user():
     }
     data["users"].append(admin_record)
     save_users(data)
+
+ensure_admin_user()
 
 def require_auth():
     if not session.get("user"):
