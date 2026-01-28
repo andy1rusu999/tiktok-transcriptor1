@@ -421,10 +421,8 @@ def fetch_direct_url(video_url: str) -> str | None:
     # METODA 1: yt-dlp binary (Cea mai sigură metodă pe server)
     log("Method 1: Trying yt-dlp binary...")
     try:
-        # Folosim sys.executable pentru a rula din venv dacă e cazul, sau direct yt-dlp
-        yt_dlp_bin = "yt-dlp"
         cmd = [
-            yt_dlp_bin,
+            sys.executable, "-m", "yt_dlp",
             "--cookies", cookiefile if cookiefile else "/dev/null",
             "--extractor-args", "tiktok:impersonate=chrome",
             "--get-url",
