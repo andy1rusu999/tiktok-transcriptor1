@@ -62,9 +62,10 @@ def call_gemini_polish(text: str) -> str | None:
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return None
+    gemini_model = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash-002")
     endpoint = (
         "https://generativelanguage.googleapis.com/v1beta/"
-        "models/gemini-1.5-flash:generateContent"
+        f"models/{gemini_model}:generateContent"
     )
     prompt = (
         "Corectează gramatical textul de mai jos, păstrează sensul exact și "
@@ -428,6 +429,7 @@ def extract_url_with_gemini(html: str, log=None) -> str | None:
     }
     try:
         response = requests.post(f"{endpoint}?key={api_key}", json=payload, timeout=25)
+        _log(f"Gemini model: {gemini_model}")
         _log(f"Gemini HTTP {response.status_code}, len={len(response.text or '')}")
         if not response.ok:
             _log(f"Gemini error body (first 300): {(response.text or '')[:300]}")
