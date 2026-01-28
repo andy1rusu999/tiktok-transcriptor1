@@ -583,7 +583,7 @@ function App() {
         </Card>
 
         {/* Progress Overview */}
-        {(isLoading || videos.length > 0) && (
+        {videos.length > 0 && (
           <Card className="shadow-lg">
             <CardHeader>
               <CardTitle className="flex items-center justify-between">
@@ -598,8 +598,8 @@ function App() {
             </CardHeader>
             <CardContent>
               <Progress
-                value={isLoading && videos.length === 0 ? 20 : overallProgress}
-                className={cn("h-3", isLoading && "animate-pulse")}
+                value={overallProgress}
+                className="h-3"
               />
               <div className="flex justify-between mt-2 text-sm text-slate-600">
                 <span>{videos.filter(v => v.status === 'completed').length} finalizate</span>
@@ -660,7 +660,7 @@ function App() {
                               return (
                                 <span className="flex items-center gap-1">
                                   <Clock className="h-4 w-4" />
-                                  Durata: {durationInfo.clock} • {durationInfo.label}
+                                  Durata: {durationInfo.clock}
                                 </span>
                               );
                             })()}
