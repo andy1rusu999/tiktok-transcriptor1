@@ -39,6 +39,12 @@ def apply_moldovan_slang(text: str) -> str:
         text = text.replace(src.capitalize(), dst.capitalize())
     return text
 
+def get_cookiefile():
+    cookiefile = os.environ.get("TIKTOK_COOKIE_FILE")
+    if cookiefile and os.path.exists(cookiefile):
+        return cookiefile
+    return None
+
 @app.route('/api/fetch-videos', methods=['POST'])
 @app.route('/fetch-videos', methods=['POST'])
 def fetch_videos():
@@ -75,6 +81,9 @@ def fetch_videos():
             'Referer': 'https://www.tiktok.com/',
         }
     }
+    cookiefile = get_cookiefile()
+    if cookiefile:
+        ydl_opts['cookiefile'] = cookiefile
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -157,6 +166,9 @@ def transcribe():
                     'Referer': 'https://www.tiktok.com/',
                 },
             }
+            cookiefile = get_cookiefile()
+            if cookiefile:
+                ydl_opts['cookiefile'] = cookiefile
             
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([video_url])
