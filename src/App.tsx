@@ -114,6 +114,8 @@ function App() {
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [overallProgress, setOverallProgress] = useState(0);
   const [activeTabById, setActiveTabById] = useState<Record<string, 'transcription' | 'subtitles'>>({});
+  const [batchJobId, setBatchJobId] = useState<string | null>(null);
+  const [isBatchRunning, setIsBatchRunning] = useState(false);
   const runIdRef = useRef(0);
 
   useEffect(() => {
@@ -125,10 +127,54 @@ function App() {
     setOverallProgress((completed / videos.length) * 100);
   }, [videos]);
 
+  useEffect(() => {
+    if (!batchJobId) return;
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      if (cancelled) return;
+      try {
+        const response = await fetch(`${apiBase}/job/${batchJobId}`);
+        const data = await response.json();
+        if (!response.ok || data.error) {
+          throw new Error(data?.error || `Eroare server: ${response.status}`);
+        }
+
+        setVideos(prev => prev.map(v => {
+          const result = data.results?.[v.id];
+          if (!result) return v;
+          if (result.status === 'completed') {
+            return { ...v, status: 'completed', transcription: result.transcription };
+          }
+          if (result.status === 'error') {
+            return { ...v, status: 'error' };
+          }
+          return v;
+        }));
+
+        if (data.status === 'completed') {
+          setIsBatchRunning(false);
+          setBatchJobId(null);
+          clearInterval(interval);
+        }
+      } catch (err) {
+        setIsBatchRunning(false);
+        setBatchJobId(null);
+        clearInterval(interval);
+      }
+    }, 2000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [batchJobId, apiBase]);
+
   // Încărcare videoclipuri din perioada selectată via backend
   const fetchVideos = async () => {
     // Invalidate any in-flight transcription run
     runIdRef.current += 1;
+    setBatchJobId(null);
+    setIsBatchRunning(false);
     let cleanUsername = username.trim();
     
     // Extrage username-ul dacă utilizatorul a introdus un link complet
@@ -288,11 +334,34 @@ function App() {
       return;
     }
 
-    for (const video of pendingVideos) {
+    setIsBatchRunning(true);
+    setVideos(prev => prev.map(v => v.status === 'pending' ? { ...v, status: 'processing' } : v));
+
+    try {
+      const payload = {
+        videos: pendingVideos.map(v => ({
+          id: v.id,
+          url: v.url,
+          directUrl: v.directUrl,
+          language: v.language,
+        })),
+      };
+      const response = await fetch(`${apiBase}/transcribe-batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok || data.error) {
+        throw new Error(data?.error || `Eroare server: ${response.status}`);
+      }
       if (runIdRef.current !== currentRunId) {
         return;
       }
-      await transcribeVideo(video.id);
+      setBatchJobId(data.job_id);
+    } catch (error: any) {
+      toast.error(error?.message || 'Eroare la pornirea transcrierii.');
+      setIsBatchRunning(false);
     }
   };
 
@@ -644,11 +713,11 @@ function App() {
                 <div className="flex items-center gap-2">
                   <Button 
                     onClick={transcribeAll}
-                    disabled={videos.every(v => v.status !== 'pending')}
+                    disabled={videos.every(v => v.status !== 'pending') || isBatchRunning}
                     className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700"
                   >
                     <Play className="mr-2 h-4 w-4" />
-                    Transcrie toate
+                    {isBatchRunning ? 'Se transcrie...' : 'Transcrie toate'}
                   </Button>
                   <Button 
                     onClick={exportCsv}

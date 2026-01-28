@@ -7,6 +7,9 @@ import sys
 import tempfile
 import urllib.parse
 import urllib.request
+import threading
+import time
+import uuid
 from pathlib import Path
 import whisper
 import yt_dlp
@@ -26,6 +29,10 @@ CORS(app, resources={r"/api/*": {"origins": cors_list}})
 print("Loading Whisper model...")
 model = whisper.load_model("base")
 print("Whisper model loaded.")
+
+# In-memory batch jobs (lost on restart)
+_JOB_LOCK = threading.Lock()
+_JOBS = {}
 
 def apply_moldovan_slang(text: str) -> str:
     if not text:
@@ -475,6 +482,104 @@ def fetch_direct_url(video_url: str) -> str | None:
     log("ALL METHODS FAILED")
     return None
 
+def transcribe_video_internal(video_url: str, direct_url: str | None, language: str | None):
+    if not direct_url:
+        direct_url = fetch_direct_url(video_url)
+    direct_url = normalize_direct_url(direct_url)
+    if not direct_url:
+        return None, "Nu am putut obține URL-ul direct pentru acest clip."
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_path = os.path.join(tmpdir, 'audio')
+        full_audio_path = audio_path + '.mp3'
+        wav_audio_path = audio_path + '.wav'
+
+        # Extract audio via yt-dlp
+        yt_dlp_audio = [
+            sys.executable, "-m", "yt_dlp",
+            "--no-playlist",
+            "--cookies", get_cookiefile() if get_cookiefile() else "/dev/null",
+            "--no-warnings",
+            "--add-header", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "--add-header", "Referer: https://www.tiktok.com/",
+            "-x",
+            "--audio-format", "mp3",
+            "--audio-quality", "2",
+            "-o", audio_path,
+            video_url,
+        ]
+        ytdlp_audio_result = subprocess.run(yt_dlp_audio, capture_output=True, text=True)
+        if ytdlp_audio_result.returncode != 0:
+            return None, f"Failed to extract audio: {ytdlp_audio_result.stderr}"
+
+        # Validate duration
+        probe_cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=nokey=1:noprint_wrappers=1",
+            full_audio_path,
+        ]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True)
+        if probe_result.returncode != 0:
+            return None, f"Failed to probe audio: {probe_result.stderr}"
+        try:
+            duration_sec = float((probe_result.stdout or "").strip() or "0")
+        except ValueError:
+            duration_sec = 0.0
+        if duration_sec <= 0.5:
+            return None, "Downloaded audio is too short to transcribe"
+
+        # Re-encode to WAV
+        if duration_sec < 1.0:
+            reencode_cmd = [
+                "ffmpeg", "-y",
+                "-i", full_audio_path,
+                "-af", "apad=pad_dur=1",
+                "-t", "1",
+                "-ac", "1",
+                "-ar", "16000",
+                wav_audio_path,
+            ]
+        else:
+            reencode_cmd = [
+                "ffmpeg", "-y",
+                "-i", full_audio_path,
+                "-ac", "1",
+                "-ar", "16000",
+                wav_audio_path,
+            ]
+        reencode_result = subprocess.run(reencode_cmd, capture_output=True, text=True)
+        if reencode_result.returncode != 0:
+            return None, f"Failed to re-encode audio: {reencode_result.stderr}"
+
+        transcribe_opts = {}
+        if language and language != 'auto':
+            whisper_lang = 'ro' if language == 'ro-md' else language
+            transcribe_opts['language'] = whisper_lang
+
+        try:
+            audio = whisper.load_audio(wav_audio_path)
+        except Exception as exc:
+            return None, f"Failed to load audio for Whisper: {exc}"
+        if audio.size == 0:
+            return None, "Downloaded audio has no samples"
+        try:
+            audio_seconds = float(audio.shape[0]) / 16000.0
+        except Exception:
+            audio_seconds = 0.0
+        if audio_seconds < 1.0:
+            return None, "Downloaded audio is too short to transcribe"
+
+        try:
+            result = model.transcribe(audio, **transcribe_opts)
+        except Exception as exc:
+            return None, f"Whisper failed to transcribe audio: {exc}"
+        transcription_text = result['text']
+        if language == 'ro-md':
+            transcription_text = apply_moldovan_slang(transcription_text)
+        return transcription_text, None
+
 def build_video_html_candidates(video_url: str) -> list[str]:
     candidates = [video_url]
     video_id = extract_video_id(video_url)
@@ -906,175 +1011,91 @@ def transcribe():
         return jsonify({"error": "Video URL is required"}), 400
 
     try:
-        # 1. Create a temporary directory to store the audio file
-        with tempfile.TemporaryDirectory() as tmpdir:
-            audio_path = os.path.join(tmpdir, 'audio')
-            full_audio_path = audio_path + '.mp3'
-            wav_audio_path = audio_path + '.wav'
-            
-            # 2. Resolve direct URL (from API) and download media
-            if not direct_url:
-                direct_url = fetch_direct_url(video_url)
-            direct_url = normalize_direct_url(direct_url)
-            if not direct_url:
-                return jsonify({"error": "Nu am putut obține URL-ul direct pentru acest clip."}), 500
-
-            # 3. Extract audio via yt-dlp (most reliable for TikTok)
-            yt_dlp_audio = [
-                sys.executable, "-m", "yt_dlp",
-                "--no-playlist",
-                "--cookies", get_cookiefile() if get_cookiefile() else "/dev/null",
-                "--no-warnings",
-                "--add-header", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                "--add-header", "Referer: https://www.tiktok.com/",
-                "-x",
-                "--audio-format", "mp3",
-                "--audio-quality", "2",
-                "-o", audio_path,
-                video_url,
-            ]
-            ytdlp_audio_result = subprocess.run(yt_dlp_audio, capture_output=True, text=True)
-            if ytdlp_audio_result.returncode != 0:
-                try:
-                    with open("/tmp/tiktok_debug.log", "a", encoding="utf-8") as handle:
-                        handle.write(f"{datetime.now().isoformat()} yt-dlp audio stderr: {ytdlp_audio_result.stderr[:2000]}\n")
-                except Exception:
-                    pass
-                # Fallback to direct URL -> ffmpeg
-                cookie_header = build_cookie_header(load_cookie_jar())
-                headers_lines = [
-                    f"Referer: {video_url}",
-                    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-                ]
-                if cookie_header:
-                    headers_lines.append(f"Cookie: {cookie_header}")
-                headers_arg = "\r\n".join(headers_lines) + "\r\n"
-                command = [
-                    "ffmpeg",
-                    "-y",
-                    "-headers", headers_arg,
-                    "-i", direct_url,
-                    "-vn",
-                    "-acodec", "libmp3lame",
-                    "-q:a", "2",
-                    full_audio_path,
-                ]
-                result = subprocess.run(command, capture_output=True, text=True)
-                if result.returncode != 0:
-                    try:
-                        with open("/tmp/tiktok_debug.log", "a", encoding="utf-8") as handle:
-                            handle.write(f"{datetime.now().isoformat()} ffmpeg direct-url stderr: {result.stderr[:2000]}\n")
-                    except Exception:
-                        pass
-                    # Last fallback: download file first, then extract audio
-                    video_path = os.path.join(tmpdir, 'video.mp4')
-                    if not download_media_url(direct_url, video_path, referer=video_url):
-                        return jsonify({"error": "Nu am putut descărca video-ul."}), 500
-                    command = [
-                        "ffmpeg",
-                        "-y",
-                        "-i", video_path,
-                        "-vn",
-                        "-acodec", "libmp3lame",
-                        "-q:a", "2",
-                        full_audio_path,
-                    ]
-                    result = subprocess.run(command, capture_output=True, text=True)
-                    if result.returncode != 0:
-                        try:
-                            with open("/tmp/tiktok_debug.log", "a", encoding="utf-8") as handle:
-                                handle.write(f"{datetime.now().isoformat()} ffmpeg local-file stderr: {result.stderr[:2000]}\n")
-                        except Exception:
-                            pass
-                        return jsonify({"error": f"Failed to extract audio: {result.stderr}"}), 500
-
-            if not os.path.exists(full_audio_path):
-                return jsonify({"error": "Failed to download audio"}), 500
-
-            if os.path.getsize(full_audio_path) == 0:
-                return jsonify({"error": "Downloaded audio is empty"}), 500
-
-            # Validate audio duration before Whisper to avoid zero-length tensor errors
-            probe_cmd = [
-                "ffprobe",
-                "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=nokey=1:noprint_wrappers=1",
-                full_audio_path,
-            ]
-            probe_result = subprocess.run(probe_cmd, capture_output=True, text=True)
-            if probe_result.returncode != 0:
-                return jsonify({"error": f"Failed to probe audio: {probe_result.stderr}"}), 500
-            try:
-                duration_sec = float((probe_result.stdout or "").strip() or "0")
-            except ValueError:
-                duration_sec = 0.0
-            if duration_sec <= 0.5:
-                return jsonify({"error": "Downloaded audio is too short to transcribe"}), 500
-
-            # Re-encode to stable WAV (16k mono). If very short, pad to 1s to avoid Whisper shape errors.
-            if duration_sec < 1.0:
-                reencode_cmd = [
-                    "ffmpeg",
-                    "-y",
-                    "-i", full_audio_path,
-                    "-af", "apad=pad_dur=1",
-                    "-t", "1",
-                    "-ac", "1",
-                    "-ar", "16000",
-                    wav_audio_path,
-                ]
-            else:
-                reencode_cmd = [
-                    "ffmpeg",
-                    "-y",
-                    "-i", full_audio_path,
-                    "-ac", "1",
-                    "-ar", "16000",
-                    wav_audio_path,
-                ]
-            reencode_result = subprocess.run(reencode_cmd, capture_output=True, text=True)
-            if reencode_result.returncode != 0:
-                return jsonify({"error": f"Failed to re-encode audio: {reencode_result.stderr}"}), 500
-
-            # 3. Transcribe using Whisper
-            # Map languages if needed (OpenAI Whisper handles 'ro', 'ru' etc.)
-            transcribe_opts = {}
-            if language and language != 'auto':
-                # Handle 'ro-md' as 'ro' for Whisper
-                whisper_lang = 'ro' if language == 'ro-md' else language
-                transcribe_opts['language'] = whisper_lang
-
-            try:
-                audio = whisper.load_audio(wav_audio_path)
-            except Exception as exc:
-                return jsonify({"error": f"Failed to load audio for Whisper: {exc}"}), 500
-            if audio.size == 0:
-                return jsonify({"error": "Downloaded audio has no samples"}), 500
-
-            # Guard against extremely short audio that breaks Whisper's mel shapes
-            try:
-                audio_seconds = float(audio.shape[0]) / 16000.0
-            except Exception:
-                audio_seconds = 0.0
-            if audio_seconds < 1.0:
-                return jsonify({"error": "Downloaded audio is too short to transcribe"}), 500
-
-            try:
-                result = model.transcribe(audio, **transcribe_opts)
-            except Exception as exc:
-                return jsonify({"error": f"Whisper failed to transcribe audio: {exc}"}), 500
-            transcription_text = result['text']
-            if language == 'ro-md':
-                transcription_text = apply_moldovan_slang(transcription_text)
-            
-            return jsonify({
-                "transcription": transcription_text,
-                "status": "completed"
-            })
-
+        transcription_text, err = transcribe_video_internal(video_url, direct_url, language)
+        if err:
+            return jsonify({"error": err}), 500
+        return jsonify({
+            "transcription": transcription_text,
+            "status": "completed"
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+def _run_batch_job(job_id: str):
+    with _JOB_LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            return
+        job["status"] = "running"
+        job["updated_at"] = datetime.utcnow().isoformat()
+
+    for item in job["videos"]:
+        with _JOB_LOCK:
+            if _JOBS.get(job_id, {}).get("status") == "cancelled":
+                break
+        video_id = item.get("id")
+        video_url = item.get("url")
+        direct_url = item.get("directUrl")
+        language = item.get("language")
+        if not video_url or not video_id:
+            result = {"status": "error", "error": "Missing video url or id"}
+        else:
+            transcription, err = transcribe_video_internal(video_url, direct_url, language)
+            if err:
+                result = {"status": "error", "error": err}
+            else:
+                result = {"status": "completed", "transcription": transcription}
+
+        with _JOB_LOCK:
+            job = _JOBS.get(job_id)
+            if not job:
+                return
+            job["results"][video_id] = result
+            job["updated_at"] = datetime.utcnow().isoformat()
+
+    with _JOB_LOCK:
+        job = _JOBS.get(job_id)
+        if job:
+            job["status"] = "completed"
+            job["updated_at"] = datetime.utcnow().isoformat()
+
+@app.route('/api/transcribe-batch', methods=['POST'])
+def transcribe_batch():
+    data = request.json or {}
+    videos = data.get("videos") or []
+    if not isinstance(videos, list) or not videos:
+        return jsonify({"error": "videos array is required"}), 400
+
+    job_id = uuid.uuid4().hex
+    job = {
+        "id": job_id,
+        "status": "queued",
+        "videos": videos,
+        "results": {},
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    with _JOB_LOCK:
+        _JOBS[job_id] = job
+
+    thread = threading.Thread(target=_run_batch_job, args=(job_id,), daemon=True)
+    thread.start()
+    return jsonify({"job_id": job_id})
+
+@app.route('/api/job/<job_id>', methods=['GET'])
+def job_status(job_id: str):
+    with _JOB_LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            return jsonify({"error": "Job not found"}), 404
+        # don't return full video payload each time
+        return jsonify({
+            "id": job["id"],
+            "status": job["status"],
+            "results": job["results"],
+            "created_at": job["created_at"],
+            "updated_at": job["updated_at"],
+        })
 
 @app.route('/api/subtitles', methods=['POST'])
 @app.route('/subtitles', methods=['POST'])
