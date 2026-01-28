@@ -910,6 +910,7 @@ def transcribe():
         with tempfile.TemporaryDirectory() as tmpdir:
             audio_path = os.path.join(tmpdir, 'audio')
             full_audio_path = audio_path + '.mp3'
+            wav_audio_path = audio_path + '.wav'
             
             # 2. Resolve direct URL (from API) and download media
             if not direct_url:
@@ -1011,6 +1012,31 @@ def transcribe():
             if duration_sec <= 0.5:
                 return jsonify({"error": "Downloaded audio is too short to transcribe"}), 500
 
+            # Re-encode to stable WAV (16k mono). If very short, pad to 1s to avoid Whisper shape errors.
+            if duration_sec < 1.0:
+                reencode_cmd = [
+                    "ffmpeg",
+                    "-y",
+                    "-i", full_audio_path,
+                    "-af", "apad=pad_dur=1",
+                    "-t", "1",
+                    "-ac", "1",
+                    "-ar", "16000",
+                    wav_audio_path,
+                ]
+            else:
+                reencode_cmd = [
+                    "ffmpeg",
+                    "-y",
+                    "-i", full_audio_path,
+                    "-ac", "1",
+                    "-ar", "16000",
+                    wav_audio_path,
+                ]
+            reencode_result = subprocess.run(reencode_cmd, capture_output=True, text=True)
+            if reencode_result.returncode != 0:
+                return jsonify({"error": f"Failed to re-encode audio: {reencode_result.stderr}"}), 500
+
             # 3. Transcribe using Whisper
             # Map languages if needed (OpenAI Whisper handles 'ro', 'ru' etc.)
             transcribe_opts = {}
@@ -1020,7 +1046,7 @@ def transcribe():
                 transcribe_opts['language'] = whisper_lang
 
             try:
-                audio = whisper.load_audio(full_audio_path)
+                audio = whisper.load_audio(wav_audio_path)
             except Exception as exc:
                 return jsonify({"error": f"Failed to load audio for Whisper: {exc}"}), 500
             if audio.size == 0:
