@@ -498,10 +498,12 @@ def transcribe():
                 else:
                     return jsonify({"error": f"Failed to resolve media URL: {result.stderr}"}), 500
 
-            # 3. Extract audio using ffmpeg
+            # 3. Extract audio using ffmpeg with TikTok headers
             command = [
                 "ffmpeg",
                 "-y",
+                "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "-headers", "Referer: https://www.tiktok.com/",
                 "-i",
                 direct_url,
                 "-vn",
