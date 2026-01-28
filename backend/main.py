@@ -480,32 +480,28 @@ def transcribe():
             audio_path = os.path.join(tmpdir, 'audio')
             full_audio_path = audio_path + '.mp3'
             
-            # 2. Get direct media URL using yt-dlp --get-url
-            if not direct_url:
-                cookiefile = get_cookiefile()
-                cmd = [
-                    sys.executable,
-                    "-m",
-                    "yt_dlp",
-                    "--cookies", cookiefile if cookiefile else "/dev/null",
-                    "--extractor-args", "tiktok:impersonate=chrome",
-                    "--get-url",
-                    video_url,
-                ]
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode == 0 and result.stdout.strip():
-                    direct_url = result.stdout.strip().split('\n')[0]
-                else:
-                    return jsonify({"error": f"Failed to resolve media URL: {result.stderr}"}), 500
+            # 2. Download video using yt-dlp
+            video_path = os.path.join(tmpdir, 'video.mp4')
+            cookiefile = get_cookiefile()
+            cmd = [
+                sys.executable,
+                "-m",
+                "yt_dlp",
+                "--cookies", cookiefile if cookiefile else "/dev/null",
+                "--extractor-args", "tiktok:impersonate=chrome",
+                "-o", video_path,
+                video_url,
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0 or not os.path.exists(video_path):
+                return jsonify({"error": f"Failed to download video: {result.stderr}"}), 500
 
-            # 3. Extract audio using ffmpeg with TikTok headers
+            # 3. Extract audio using ffmpeg from downloaded video
             command = [
                 "ffmpeg",
                 "-y",
-                "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "-headers", "Referer: https://www.tiktok.com/",
                 "-i",
-                direct_url,
+                video_path,
                 "-vn",
                 "-acodec",
                 "libmp3lame",
