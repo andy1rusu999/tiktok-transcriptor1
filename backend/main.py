@@ -53,6 +53,9 @@ def get_cookiefile():
     cookiefile = os.environ.get("TIKTOK_COOKIE_FILE")
     if cookiefile and os.path.exists(cookiefile):
         return cookiefile
+    default_path = Path(__file__).resolve().parent / "cookies.txt"
+    if default_path.exists():
+        return str(default_path)
     return None
 
 def call_gemini_polish(text: str) -> str | None:
