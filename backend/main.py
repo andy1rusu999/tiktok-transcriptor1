@@ -747,8 +747,17 @@ def download_media_url(media_url: str, target_path: str, referer: str | None = N
         # TikTok is strict about Referer; use the actual video URL when available
         'Referer': referer or 'https://www.tiktok.com/',
     }
+    debug_log = Path("/tmp/tiktok_debug.log")
     try:
         with requests.get(media_url, headers=headers, cookies=cookies, stream=True, timeout=30) as response:
+            try:
+                with open(debug_log, "a", encoding="utf-8") as handle:
+                    handle.write(
+                        f"{datetime.now().isoformat()} download_media_url status={response.status_code} "
+                        f"content-type={response.headers.get('Content-Type','')} url={media_url[:80]}\n"
+                    )
+            except Exception:
+                pass
             response.raise_for_status()
             with open(target_path, 'wb') as handle:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
@@ -757,6 +766,11 @@ def download_media_url(media_url: str, target_path: str, referer: str | None = N
         return True
     except Exception as exc:
         print(f"Failed to download media URL: {exc}")
+        try:
+            with open(debug_log, "a", encoding="utf-8") as handle:
+                handle.write(f"{datetime.now().isoformat()} download_media_url exception: {exc}\n")
+        except Exception:
+            pass
         return False
 
 def extract_subtitle_text(raw_text: str, ext: str) -> str:
@@ -1013,6 +1027,11 @@ def transcribe():
             ]
             result = subprocess.run(command, capture_output=True, text=True)
             if result.returncode != 0:
+                try:
+                    with open("/tmp/tiktok_debug.log", "a", encoding="utf-8") as handle:
+                        handle.write(f"{datetime.now().isoformat()} ffmpeg direct-url stderr: {result.stderr[:2000]}\n")
+                except Exception:
+                    pass
                 # Fallback: download file first, then extract audio
                 video_path = os.path.join(tmpdir, 'video.mp4')
                 if not download_media_url(direct_url, video_path, referer=video_url):
@@ -1028,6 +1047,11 @@ def transcribe():
                 ]
                 result = subprocess.run(command, capture_output=True, text=True)
                 if result.returncode != 0:
+                    try:
+                        with open("/tmp/tiktok_debug.log", "a", encoding="utf-8") as handle:
+                            handle.write(f"{datetime.now().isoformat()} ffmpeg local-file stderr: {result.stderr[:2000]}\n")
+                    except Exception:
+                        pass
                     return jsonify({"error": f"Failed to extract audio: {result.stderr}"}), 500
 
             if not os.path.exists(full_audio_path):
