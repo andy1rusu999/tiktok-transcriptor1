@@ -27,7 +27,6 @@ import {
 import { 
   Calendar as CalendarIcon, 
   Mic, 
-  UserCircle2,
   Languages, 
   Play, 
   Download, 
@@ -574,11 +573,18 @@ function App() {
           </Card>
         ) : (
           <>
-            <div className="absolute top-3 right-3 z-10">
+            <div className="absolute top-4 right-4 z-10">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="rounded-full h-16 w-16">
-                    <UserCircle2 className="h-11 w-11" />
+                  <Button
+                    variant="ghost"
+                    className="rounded-full h-16 w-16 overflow-hidden p-0"
+                  >
+                    <img
+                      src="/assets/image-c9127b13-8d4e-405d-8070-7e1b3cff7719.png"
+                      alt="Utilizator"
+                      className="h-full w-full object-cover"
+                    />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
