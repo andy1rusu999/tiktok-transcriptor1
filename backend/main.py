@@ -918,41 +918,41 @@ def transcribe():
             if not direct_url:
                 return jsonify({"error": "Nu am putut obține URL-ul direct pentru acest clip."}), 500
 
-            # 3. Extract audio using ffmpeg directly from URL (more reliable than requests)
-            cookie_header = build_cookie_header(load_cookie_jar())
-            headers_lines = [
-                f"Referer: {video_url}",
-                "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            # 3. Extract audio via yt-dlp (most reliable for TikTok)
+            yt_dlp_audio = [
+                sys.executable, "-m", "yt_dlp",
+                "--no-playlist",
+                "--cookies", get_cookiefile() if get_cookiefile() else "/dev/null",
+                "--no-warnings",
+                "--add-header", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                "--add-header", "Referer: https://www.tiktok.com/",
+                "-x",
+                "--audio-format", "mp3",
+                "--audio-quality", "2",
+                "-o", audio_path,
+                video_url,
             ]
-            if cookie_header:
-                headers_lines.append(f"Cookie: {cookie_header}")
-            headers_arg = "\r\n".join(headers_lines) + "\r\n"
-
-            command = [
-                "ffmpeg",
-                "-y",
-                "-headers", headers_arg,
-                "-i", direct_url,
-                "-vn",
-                "-acodec", "libmp3lame",
-                "-q:a", "2",
-                full_audio_path,
-            ]
-            result = subprocess.run(command, capture_output=True, text=True)
-            if result.returncode != 0:
+            ytdlp_audio_result = subprocess.run(yt_dlp_audio, capture_output=True, text=True)
+            if ytdlp_audio_result.returncode != 0:
                 try:
                     with open("/tmp/tiktok_debug.log", "a", encoding="utf-8") as handle:
-                        handle.write(f"{datetime.now().isoformat()} ffmpeg direct-url stderr: {result.stderr[:2000]}\n")
+                        handle.write(f"{datetime.now().isoformat()} yt-dlp audio stderr: {ytdlp_audio_result.stderr[:2000]}\n")
                 except Exception:
                     pass
-                # Fallback: download file first, then extract audio
-                video_path = os.path.join(tmpdir, 'video.mp4')
-                if not download_media_url(direct_url, video_path, referer=video_url):
-                    return jsonify({"error": "Nu am putut descărca video-ul."}), 500
+                # Fallback to direct URL -> ffmpeg
+                cookie_header = build_cookie_header(load_cookie_jar())
+                headers_lines = [
+                    f"Referer: {video_url}",
+                    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                ]
+                if cookie_header:
+                    headers_lines.append(f"Cookie: {cookie_header}")
+                headers_arg = "\r\n".join(headers_lines) + "\r\n"
                 command = [
                     "ffmpeg",
                     "-y",
-                    "-i", video_path,
+                    "-headers", headers_arg,
+                    "-i", direct_url,
                     "-vn",
                     "-acodec", "libmp3lame",
                     "-q:a", "2",
@@ -962,10 +962,30 @@ def transcribe():
                 if result.returncode != 0:
                     try:
                         with open("/tmp/tiktok_debug.log", "a", encoding="utf-8") as handle:
-                            handle.write(f"{datetime.now().isoformat()} ffmpeg local-file stderr: {result.stderr[:2000]}\n")
+                            handle.write(f"{datetime.now().isoformat()} ffmpeg direct-url stderr: {result.stderr[:2000]}\n")
                     except Exception:
                         pass
-                    return jsonify({"error": f"Failed to extract audio: {result.stderr}"}), 500
+                    # Last fallback: download file first, then extract audio
+                    video_path = os.path.join(tmpdir, 'video.mp4')
+                    if not download_media_url(direct_url, video_path, referer=video_url):
+                        return jsonify({"error": "Nu am putut descărca video-ul."}), 500
+                    command = [
+                        "ffmpeg",
+                        "-y",
+                        "-i", video_path,
+                        "-vn",
+                        "-acodec", "libmp3lame",
+                        "-q:a", "2",
+                        full_audio_path,
+                    ]
+                    result = subprocess.run(command, capture_output=True, text=True)
+                    if result.returncode != 0:
+                        try:
+                            with open("/tmp/tiktok_debug.log", "a", encoding="utf-8") as handle:
+                                handle.write(f"{datetime.now().isoformat()} ffmpeg local-file stderr: {result.stderr[:2000]}\n")
+                        except Exception:
+                            pass
+                        return jsonify({"error": f"Failed to extract audio: {result.stderr}"}), 500
 
             if not os.path.exists(full_audio_path):
                 return jsonify({"error": "Failed to download audio"}), 500
