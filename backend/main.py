@@ -415,18 +415,41 @@ def fetch_direct_url(video_url: str) -> str | None:
         return None
 
     cookies = load_cookie_jar()
+    cookiefile = get_cookiefile()
     log(f"Cookies loaded: {len(cookies)} items, msToken={'yes' if cookies.get('msToken') else 'no'}")
     
-    # 1. Încercăm item_list fallback direct (e cel mai stabil)
-    log("Trying item_list fallback first...")
+    # METODA 1: yt-dlp binary (Cea mai sigură metodă pe server)
+    log("Method 1: Trying yt-dlp binary...")
+    try:
+        # Folosim sys.executable pentru a rula din venv dacă e cazul, sau direct yt-dlp
+        yt_dlp_bin = "yt-dlp"
+        cmd = [
+            yt_dlp_bin,
+            "--cookies", cookiefile if cookiefile else "/dev/null",
+            "--extractor-args", "tiktok:impersonate=chrome",
+            "--get-url",
+            video_url
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
+        if res.returncode == 0 and res.stdout.strip():
+            url = res.stdout.strip().split('\n')[0]
+            if url.startswith("http"):
+                log(f"yt-dlp SUCCESS: {url[:80]}")
+                return url
+        log(f"yt-dlp failed (code {res.returncode}): {res.stderr[:200]}")
+    except Exception as e:
+        log(f"yt-dlp exception: {e}")
+
+    # METODA 2: item_list API (Fallback-ul care a mers la listare)
+    log("Method 2: Trying item_list fallback...")
     direct_from_list = fetch_direct_url_from_item_list(video_url)
     if direct_from_list:
         log(f"item_list SUCCESS: {direct_from_list[:80]}")
         return direct_from_list
     log("item_list FAILED")
 
-    # 2. Încercăm să luăm HTML-ul și să folosim Gemini pentru extracție
-    log("Fetching HTML for Gemini extraction...")
+    # METODA 3: Gemini + HTML
+    log("Method 3: Fetching HTML for Gemini extraction...")
     html = fetch_video_html(video_url, cookies)
     if html:
         log(f"HTML fetched, length: {len(html)}. Calling Gemini...")
@@ -436,9 +459,9 @@ def fetch_direct_url(video_url: str) -> str | None:
             return direct_gemini
         log("Gemini extraction FAILED")
     
-    # 3. Ultimul efort: Regex clasic pe HTML
+    # METODA 4: Regex clasic pe HTML
     if html:
-        log("Trying final regex fallback on HTML...")
+        log("Method 4: Trying final regex fallback on HTML...")
         direct_from_html = extract_url_from_html(html)
         if direct_from_html:
             log(f"Final regex SUCCESS: {direct_from_html[:80]}")
