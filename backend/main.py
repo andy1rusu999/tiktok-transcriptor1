@@ -181,11 +181,9 @@ def fetch_videos():
     tiktok_url = f"https://www.tiktok.com/@{username}"
     
     ydl_opts = {
-        'extract_flat': False,
-        'skip_download': True,
-        'quiet': False,  # Changed to False for better debugging
+        'extract_flat': True,
+        'quiet': False,
         'no_warnings': False,
-        'ignoreerrors': True,
         'http_headers': {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
@@ -213,27 +211,15 @@ def fetch_videos():
             for entry in result.get('entries', []):
                 if not entry:
                     continue
+                
+                # Get date using our robust extractor
                 video_date = extract_video_date(entry)
 
                 if start_day or end_day:
                     if not video_date:
-                        entry_url = (
-                            entry.get('webpage_url')
-                            or entry.get('original_url')
-                            or entry.get('url')
-                            or entry.get('id')
-                        )
-                        if entry_url and not entry_url.startswith('http'):
-                            entry_url = f"https://www.tiktok.com/@{username}/video/{entry_url}"
-                        if entry_url:
-                            try:
-                                details = ydl.extract_info(entry_url, download=False)
-                                video_date = extract_video_date(details)
-                            except Exception as exc:
-                                print(f"Error fetching details for {entry_url}: {exc}")
-                                video_date = None
-                        if not video_date:
-                            continue
+                        # Since we are in extract_flat: True, we rely on the ID
+                        continue
+                    
                     video_day = video_date.date()
                     if start_day and video_day < start_day:
                         continue
