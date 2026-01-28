@@ -360,6 +360,47 @@ def fetch_direct_url_from_item_list(video_url: str) -> str | None:
 
     return None
 
+def extract_url_with_gemini(html: str) -> str | None:
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key or not html:
+        return None
+    endpoint = (
+        "https://generativelanguage.googleapis.com/v1beta/"
+        "models/gemini-1.5-flash:generateContent"
+    )
+    # Trimitem doar părțile relevante din HTML (script-urile de stare) pentru a nu depăși limita de tokeni
+    scripts = re.findall(r'<script[^>]*>(.*?)</script>', html, re.DOTALL)
+    relevant_content = "\n".join([s for s in scripts if "playAddr" in s or "downloadAddr" in s or "SIGI_STATE" in s or "UNIVERSAL_DATA" in s])
+    if not relevant_content:
+        relevant_content = html[:30000] # Fallback la începutul HTML-ului
+
+    prompt = (
+        "Extract the direct video MP4 URL from the following TikTok HTML/JSON data. "
+        "Look for 'playAddr' or 'downloadAddr'. Return ONLY the raw URL string, nothing else."
+    )
+    payload = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {"text": prompt},
+                    {"text": relevant_content},
+                ],
+            }
+        ],
+        "generationConfig": {"temperature": 0.1},
+    }
+    try:
+        response = requests.post(f"{endpoint}?key={api_key}", json=payload, timeout=20)
+        if response.ok:
+            data = response.json()
+            text = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+            if text.startswith("http"):
+                return text
+    except Exception as e:
+        print(f"Gemini URL extraction failed: {e}")
+    return None
+
 def fetch_direct_url(video_url: str) -> str | None:
     debug_log = Path("/tmp/tiktok_debug.log")
     
@@ -376,92 +417,35 @@ def fetch_direct_url(video_url: str) -> str | None:
     cookies = load_cookie_jar()
     log(f"Cookies loaded: {len(cookies)} items, msToken={'yes' if cookies.get('msToken') else 'no'}")
     
-    ms_token = cookies.get("msToken")
-    params = {
-        "aid": "1988",
-        "itemId": video_id,
-        "app_name": "tiktok_web",
-        "device_platform": "webapp",
-        "os": "web",
-    }
-    if ms_token:
-        params["msToken"] = ms_token
-    url = "https://www.tiktok.com/api/item/detail/?" + urllib.parse.urlencode(params)
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': video_url,
-    }
-    cookie_header = build_cookie_header(cookies)
-    if cookie_header:
-        headers['Cookie'] = cookie_header
-
-    try:
-        response = requests.get(url, headers=headers, cookies=cookies, timeout=20)
-        log(f"item/detail status: {response.status_code}, length: {len(response.text)}")
-        if not response.ok:
-            log(f"Response text: {response.text[:300]}")
-            log("Trying item_list fallback immediately (bad status)")
-            direct_from_list = fetch_direct_url_from_item_list(video_url)
-            if direct_from_list:
-                log(f"item_list fallback SUCCESS: {direct_from_list[:80]}")
-                return direct_from_list
-            log("item_list fallback FAILED")
-            return None
-        try:
-            data = response.json()
-            log(f"Response keys: {list(data.keys())}")
-        except Exception as json_exc:
-            log(f"JSON parse failed: {json_exc}, text: {response.text[:300]}")
-            log("Trying item_list fallback immediately (invalid JSON)")
-            direct_from_list = fetch_direct_url_from_item_list(video_url)
-            if direct_from_list:
-                log(f"item_list fallback SUCCESS: {direct_from_list[:80]}")
-                return direct_from_list
-            log("item_list fallback FAILED")
-            return None
-    except Exception as exc:
-        log(f"Request exception: {exc}")
-        log("Trying item_list fallback immediately (request failed)")
-        direct_from_list = fetch_direct_url_from_item_list(video_url)
-        if direct_from_list:
-            log(f"item_list fallback SUCCESS: {direct_from_list[:80]}")
-            return direct_from_list
-        log("item_list fallback FAILED")
-        return None
-
-    item = data.get("itemInfo", {}).get("itemStruct")
-    if not item:
-        item = {}
-    video_info = item.get("video", {}) or {}
-    play_addr = video_info.get("playAddr") or video_info.get("play_addr") or {}
-    download_addr = video_info.get("downloadAddr") or video_info.get("download_addr") or {}
-    for addr in (play_addr, download_addr):
-        if isinstance(addr, dict):
-            url_list = addr.get("urlList") or addr.get("url_list") or []
-            if url_list:
-                log(f"Found directUrl in item/detail: {url_list[0][:80]}")
-                return url_list[0]
-    
-    log("Direct URL not found in item/detail; trying item_list fallback.")
+    # 1. Încercăm item_list fallback direct (e cel mai stabil)
+    log("Trying item_list fallback first...")
     direct_from_list = fetch_direct_url_from_item_list(video_url)
     if direct_from_list:
-        log(f"item_list fallback SUCCESS: {direct_from_list[:80]}")
+        log(f"item_list SUCCESS: {direct_from_list[:80]}")
         return direct_from_list
-    
-    log("item_list fallback FAILED, trying HTML parse")
-    # Fallback: parse video page HTML for direct URL
+    log("item_list FAILED")
+
+    # 2. Încercăm să luăm HTML-ul și să folosim Gemini pentru extracție
+    log("Fetching HTML for Gemini extraction...")
     html = fetch_video_html(video_url, cookies)
-    if not html:
-        log("No HTML fetched")
-        return None
-    direct_from_html = extract_url_from_html(html)
-    if direct_from_html:
-        log(f"HTML parse SUCCESS: {direct_from_html[:80]}")
-    else:
-        log("HTML parse FAILED")
-    return direct_from_html
+    if html:
+        log(f"HTML fetched, length: {len(html)}. Calling Gemini...")
+        direct_gemini = extract_url_with_gemini(html)
+        if direct_gemini:
+            log(f"Gemini extraction SUCCESS: {direct_gemini[:80]}")
+            return direct_gemini
+        log("Gemini extraction FAILED")
+    
+    # 3. Ultimul efort: Regex clasic pe HTML
+    if html:
+        log("Trying final regex fallback on HTML...")
+        direct_from_html = extract_url_from_html(html)
+        if direct_from_html:
+            log(f"Final regex SUCCESS: {direct_from_html[:80]}")
+            return direct_from_html
+
+    log("ALL METHODS FAILED")
+    return None
 
 def build_video_html_candidates(video_url: str) -> list[str]:
     candidates = [video_url]
