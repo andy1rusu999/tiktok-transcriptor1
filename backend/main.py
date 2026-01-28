@@ -295,6 +295,71 @@ def extract_video_id(video_url: str) -> str | None:
         return match.group(1)
     return None
 
+def extract_username_from_url(video_url: str) -> str | None:
+    match = re.search(r'@([^/?#]+)', video_url)
+    if match:
+        return match.group(1)
+    return None
+
+def fetch_direct_url_from_item_list(video_url: str) -> str | None:
+    video_id = extract_video_id(video_url)
+    if not video_id:
+        return None
+    username = extract_username_from_url(video_url)
+    if not username:
+        return None
+
+    cookies = load_cookie_jar()
+    secuid = resolve_secuid(username, cookies)
+    if not secuid:
+        return None
+
+    ms_token = cookies.get("msToken")
+    cursor = 0
+    has_more = True
+    max_pages = 40
+    page = 0
+
+    while has_more and page < max_pages:
+        params = {
+            "aid": "1988",
+            "count": "35",
+            "cursor": str(cursor),
+            "secUid": secuid,
+        }
+        if ms_token:
+            params["msToken"] = ms_token
+        url = "https://www.tiktok.com/api/post/item_list/?" + urllib.parse.urlencode(params)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Referer': f"https://www.tiktok.com/@{username}",
+        }
+        cookie_header = build_cookie_header(cookies)
+        if cookie_header:
+            headers['Cookie'] = cookie_header
+
+        try:
+            response = requests.get(url, headers=headers, cookies=cookies, timeout=20)
+            if not response.ok:
+                print(f"Item list status {response.status_code}: {response.text[:200]}")
+                return None
+            data = response.json()
+        except Exception as exc:
+            print(f"Failed to fetch item list page {page}: {exc}")
+            return None
+
+        items = data.get("itemList") or data.get("item_list") or []
+        for item in items:
+            if str(item.get("id")) == str(video_id):
+                return extract_url_from_item(item)
+
+        cursor = data.get("cursor", 0)
+        has_more = bool(data.get("hasMore"))
+        page += 1
+
+    return None
+
 def fetch_direct_url(video_url: str) -> str | None:
     video_id = extract_video_id(video_url)
     if not video_id:
@@ -343,6 +408,10 @@ def fetch_direct_url(video_url: str) -> str | None:
             url_list = addr.get("urlList") or addr.get("url_list") or []
             if url_list:
                 return url_list[0]
+    print("Direct URL not found in item/detail; trying item_list fallback.")
+    direct_from_list = fetch_direct_url_from_item_list(video_url)
+    if direct_from_list:
+        return direct_from_list
     # Fallback: parse video page HTML for direct URL
     html = fetch_video_html(video_url, cookies)
     if not html:
