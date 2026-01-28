@@ -140,6 +140,8 @@ function App() {
 
     setIsLoading(true);
     setVideos([]); // Curăță lista veche
+    setOverallProgress(0);
+    setActiveTabById({});
     
     try {
       const response = await fetch(`${apiBase}/fetch-videos`, {
