@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -114,9 +114,12 @@ function App() {
   const [videos, setVideos] = useState<VideoData[]>([]);
   const [overallProgress, setOverallProgress] = useState(0);
   const [activeTabById, setActiveTabById] = useState<Record<string, 'transcription' | 'subtitles'>>({});
+  const runIdRef = useRef(0);
 
   // Încărcare videoclipuri din perioada selectată via backend
   const fetchVideos = async () => {
+    // Invalidate any in-flight transcription run
+    runIdRef.current += 1;
     let cleanUsername = username.trim();
     
     // Extrage username-ul dacă utilizatorul a introdus un link complet
@@ -197,6 +200,7 @@ function App() {
 
   // Transcrierea audio reală via backend
   const transcribeVideo = async (videoId: string) => {
+    const currentRunId = runIdRef.current;
     const video = videos.find(v => v.id === videoId);
     if (!video) return;
 
@@ -232,6 +236,9 @@ function App() {
       }
 
       if (!response.ok || data.error) {
+        if (runIdRef.current !== currentRunId) {
+          return;
+        }
         const serverError = data?.error || `Eroare server: ${response.status}`;
         toast.error(`Eroare la transcriere: ${serverError}`);
         setVideos(prev => prev.map(v => 
@@ -240,6 +247,9 @@ function App() {
         return;
       }
 
+      if (runIdRef.current !== currentRunId) {
+        return;
+      }
       setVideos(prev => prev.map(v => 
         v.id === videoId ? { 
           ...v, 
@@ -253,14 +263,17 @@ function App() {
     } catch (error: any) {
       const message = error?.message || 'Eroare de conexiune la serverul de transcriere.';
       toast.error(message);
-      setVideos(prev => prev.map(v => 
-        v.id === videoId ? { ...v, status: 'error' } : v
-      ));
+      if (runIdRef.current === currentRunId) {
+        setVideos(prev => prev.map(v => 
+          v.id === videoId ? { ...v, status: 'error' } : v
+        ));
+      }
     }
   };
 
   // Transcriere toate videoclipurile
   const transcribeAll = async () => {
+    const currentRunId = runIdRef.current;
     const pendingVideos = videos.filter(v => v.status === 'pending');
     if (pendingVideos.length === 0) {
       toast.info('Nu există videoclipuri în așteptare');
@@ -268,6 +281,9 @@ function App() {
     }
 
     for (const video of pendingVideos) {
+      if (runIdRef.current !== currentRunId) {
+        return;
+      }
       await transcribeVideo(video.id);
     }
   };
