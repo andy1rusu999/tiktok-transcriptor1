@@ -986,8 +986,8 @@ def transcribe():
                 duration_sec = float((probe_result.stdout or "").strip() or "0")
             except ValueError:
                 duration_sec = 0.0
-            if duration_sec <= 0:
-                return jsonify({"error": "Downloaded audio has zero duration"}), 500
+            if duration_sec <= 0.5:
+                return jsonify({"error": "Downloaded audio is too short to transcribe"}), 500
 
             # 3. Transcribe using Whisper
             # Map languages if needed (OpenAI Whisper handles 'ro', 'ru' etc.)
@@ -1009,7 +1009,7 @@ def transcribe():
                 audio_seconds = float(audio.shape[0]) / 16000.0
             except Exception:
                 audio_seconds = 0.0
-            if audio_seconds < 0.5:
+            if audio_seconds < 1.0:
                 return jsonify({"error": "Downloaded audio is too short to transcribe"}), 500
 
             try:
