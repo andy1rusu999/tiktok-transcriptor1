@@ -136,12 +136,24 @@ def extract_video_date(info: dict) -> datetime | None:
             return datetime.strptime(upload_date_str, '%Y%m%d').replace(tzinfo=None)
         except Exception as exc:
             print(f"Error parsing date {upload_date_str}: {exc}")
+    
     timestamp = info.get('timestamp') or info.get('release_timestamp')
     if timestamp:
         try:
             return datetime.fromtimestamp(int(timestamp)).replace(tzinfo=None)
         except Exception as exc:
             print(f"Error parsing timestamp {timestamp}: {exc}")
+            
+    # Fallback: Extract from TikTok ID
+    video_id = info.get('id')
+    if video_id and video_id.isdigit():
+        try:
+            ts = int(video_id) >> 32
+            if ts > 1262304000: # After 2010
+                return datetime.fromtimestamp(ts).replace(tzinfo=None)
+        except Exception as exc:
+            print(f"Error extracting date from ID {video_id}: {exc}")
+            
     return None
 
 @app.route('/api/fetch-videos', methods=['POST'])
