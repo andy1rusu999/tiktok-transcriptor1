@@ -148,6 +148,9 @@ function App() {
         setVideos(prev => prev.map(v => {
           const result = data.results?.[v.id];
           if (!result) return v;
+          if (result.status === 'processing') {
+            return { ...v, status: 'processing' };
+          }
           if (result.status === 'completed') {
             return { ...v, status: 'completed', transcription: result.transcription };
           }

@@ -1037,6 +1037,12 @@ def _run_batch_job(job_id: str):
         video_url = item.get("url")
         direct_url = item.get("directUrl")
         language = item.get("language")
+        with _JOB_LOCK:
+            job = _JOBS.get(job_id)
+            if not job:
+                return
+            job["results"][video_id] = {"status": "processing"}
+            job["updated_at"] = datetime.utcnow().isoformat()
         if not video_url or not video_id:
             result = {"status": "error", "error": "Missing video url or id"}
         else:
