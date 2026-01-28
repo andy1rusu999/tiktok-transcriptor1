@@ -154,7 +154,8 @@ def fetch_videos():
     tiktok_url = f"https://www.tiktok.com/@{username}"
     
     ydl_opts = {
-        'extract_flat': True,
+        'extract_flat': False,
+        'skip_download': True,
         'quiet': False,  # Changed to False for better debugging
         'no_warnings': False,
         'http_headers': {
