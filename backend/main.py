@@ -991,15 +991,21 @@ def transcribe():
             if not direct_url:
                 return jsonify({"error": "Nu am putut obține URL-ul direct pentru acest clip."}), 500
 
-            video_path = os.path.join(tmpdir, 'video.mp4')
-            if not download_media_url(direct_url, video_path, referer=video_url):
-                return jsonify({"error": "Nu am putut descărca video-ul."}), 500
+            # 3. Extract audio using ffmpeg directly from URL (more reliable than requests)
+            cookie_header = build_cookie_header(load_cookie_jar())
+            headers_lines = [
+                f"Referer: {video_url}",
+                "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            ]
+            if cookie_header:
+                headers_lines.append(f"Cookie: {cookie_header}")
+            headers_arg = "\r\n".join(headers_lines) + "\r\n"
 
-            # 3. Extract audio using ffmpeg
             command = [
                 "ffmpeg",
                 "-y",
-                "-i", video_path,
+                "-headers", headers_arg,
+                "-i", direct_url,
                 "-vn",
                 "-acodec", "libmp3lame",
                 "-q:a", "2",
@@ -1007,7 +1013,22 @@ def transcribe():
             ]
             result = subprocess.run(command, capture_output=True, text=True)
             if result.returncode != 0:
-                return jsonify({"error": f"Failed to extract audio: {result.stderr}"}), 500
+                # Fallback: download file first, then extract audio
+                video_path = os.path.join(tmpdir, 'video.mp4')
+                if not download_media_url(direct_url, video_path, referer=video_url):
+                    return jsonify({"error": "Nu am putut descărca video-ul."}), 500
+                command = [
+                    "ffmpeg",
+                    "-y",
+                    "-i", video_path,
+                    "-vn",
+                    "-acodec", "libmp3lame",
+                    "-q:a", "2",
+                    full_audio_path,
+                ]
+                result = subprocess.run(command, capture_output=True, text=True)
+                if result.returncode != 0:
+                    return jsonify({"error": f"Failed to extract audio: {result.stderr}"}), 500
 
             if not os.path.exists(full_audio_path):
                 return jsonify({"error": "Failed to download audio"}), 500
