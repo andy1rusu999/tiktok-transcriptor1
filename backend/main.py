@@ -10,7 +10,6 @@ import urllib.request
 import threading
 import time
 import uuid
-import concurrent.futures
 from pathlib import Path
 import whisper
 import yt_dlp
@@ -1030,43 +1029,29 @@ def _run_batch_job(job_id: str):
         job["status"] = "running"
         job["updated_at"] = datetime.utcnow().isoformat()
 
-    max_workers = int(os.environ.get("BATCH_WORKERS", "3"))
-    def _process(item):
+    for item in job["videos"]:
+        with _JOB_LOCK:
+            if _JOBS.get(job_id, {}).get("status") == "cancelled":
+                break
         video_id = item.get("id")
         video_url = item.get("url")
         direct_url = item.get("directUrl")
         language = item.get("language")
         if not video_url or not video_id:
-            return video_id, {"status": "error", "error": "Missing video url or id"}
-        transcription, err = transcribe_video_internal(video_url, direct_url, language)
-        if err:
-            return video_id, {"status": "error", "error": err}
-        return video_id, {"status": "completed", "transcription": transcription}
+            result = {"status": "error", "error": "Missing video url or id"}
+        else:
+            transcription, err = transcribe_video_internal(video_url, direct_url, language)
+            if err:
+                result = {"status": "error", "error": err}
+            else:
+                result = {"status": "completed", "transcription": transcription}
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {}
-        for item in job["videos"]:
-            with _JOB_LOCK:
-                if _JOBS.get(job_id, {}).get("status") == "cancelled":
-                    break
-            futures[executor.submit(_process, item)] = item
-
-        for future in concurrent.futures.as_completed(futures):
-            with _JOB_LOCK:
-                if _JOBS.get(job_id, {}).get("status") == "cancelled":
-                    break
-            try:
-                video_id, result = future.result()
-            except Exception as exc:
-                item = futures.get(future) or {}
-                video_id = item.get("id") or "unknown"
-                result = {"status": "error", "error": str(exc)}
-            with _JOB_LOCK:
-                job = _JOBS.get(job_id)
-                if not job:
-                    return
-                job["results"][video_id] = result
-                job["updated_at"] = datetime.utcnow().isoformat()
+        with _JOB_LOCK:
+            job = _JOBS.get(job_id)
+            if not job:
+                return
+            job["results"][video_id] = result
+            job["updated_at"] = datetime.utcnow().isoformat()
 
     with _JOB_LOCK:
         job = _JOBS.get(job_id)
