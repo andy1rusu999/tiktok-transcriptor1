@@ -407,14 +407,15 @@ def fetch_direct_url(video_url: str) -> str | None:
     def yt_dlp_get_url(use_impersonate: bool) -> str | None:
         cmd = [
             sys.executable, "-m", "yt_dlp",
+            "--no-playlist",
             "--cookies", cookiefile if cookiefile else "/dev/null",
             "--no-warnings",
-            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "--add-header", f"Referer:{video_url}",
+            "--add-header", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "--add-header", "Referer: https://www.tiktok.com/",
         ]
         if use_impersonate:
             cmd += ["--extractor-args", "tiktok:impersonate=chrome"]
-        cmd += ["--get-url", video_url]
+        cmd += ["--print", "url", video_url]
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=40)
             if res.returncode == 0 and res.stdout.strip():
@@ -549,51 +550,50 @@ def find_item_struct(payload: object) -> dict | None:
     return None
 
 def extract_url_from_html(html: str) -> str | None:
-    def find_direct_url(obj) -> str | None:
-        # Recursively search for playAddr/downloadAddr/urlList fields that contain mp4 URLs
-        if isinstance(obj, dict):
-            # direct video info case
-            if "playAddr" in obj or "downloadAddr" in obj:
-                play_addr = obj.get("playAddr") or obj.get("play_addr") or {}
-                download_addr = obj.get("downloadAddr") or obj.get("download_addr") or {}
-                for addr in (play_addr, download_addr):
-                    if isinstance(addr, dict):
-                        url_list = addr.get("urlList") or addr.get("url_list") or []
-                        for u in url_list:
-                            if isinstance(u, str) and u.startswith("http") and ("video_mp4" in u or ".mp4" in u):
-                                return u
-            # generic urlList case
-            if "urlList" in obj or "url_list" in obj:
-                url_list = obj.get("urlList") or obj.get("url_list") or []
-                for u in url_list:
-                    if isinstance(u, str) and u.startswith("http") and ("video_mp4" in u or ".mp4" in u):
-                        return u
-
-            for v in obj.values():
-                found = find_direct_url(v)
-                if found:
-                    return found
-        elif isinstance(obj, list):
-            for v in obj:
-                found = find_direct_url(v)
-                if found:
-                    return found
+    def extract_tiktok_json(payload: str):
+        match = re.search(
+            r'id="__UNIVERSAL_DATA_FOR_REHYDRATION__"\s*type="application/json"\s*>(.*?)</script>',
+            payload,
+            re.S
+        )
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except Exception:
+                pass
+        match = re.search(
+            r'id="SIGI_STATE"\s*type="application/json"\s*>(.*?)</script>',
+            payload,
+            re.S
+        )
+        if match:
+            try:
+                return json.loads(match.group(1))
+            except Exception:
+                pass
         return None
 
-    # Common on modern TikTok pages
-    next_match = re.search(
-        r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>',
-        html,
-        re.DOTALL
-    )
-    if next_match:
-        try:
-            data = json.loads(next_match.group(1))
-            found = find_direct_url(data)
-            if found:
-                return found
-        except Exception:
-            pass
+    def deep_find(obj, key):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                if k == key:
+                    yield v
+                yield from deep_find(v, key)
+        elif isinstance(obj, list):
+            for it in obj:
+                yield from deep_find(it, key)
+
+    data = extract_tiktok_json(html)
+    if data:
+        candidates = list(deep_find(data, "playAddr")) + list(deep_find(data, "downloadAddr"))
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate.startswith("http"):
+                return candidate
+            if isinstance(candidate, dict):
+                url_list = candidate.get("urlList") or candidate.get("url_list") or []
+                for u in url_list:
+                    if isinstance(u, str) and u.startswith("http"):
+                        return u
 
     sigi_match = re.search(r'id="SIGI_STATE"[^>]*>(.*?)</script>', html, re.DOTALL)
     if sigi_match:
