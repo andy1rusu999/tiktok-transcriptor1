@@ -623,6 +623,8 @@ def transcribe_video_internal(video_url: str, direct_url: str | None, language: 
             duration_sec = 0.0
         if duration_sec <= 0.5:
             return None, "Downloaded audio is too short to transcribe"
+        if duration_sec > 1800:
+            return None, "Clipul depășește durata maximă de 30 de minute"
 
         # Re-encode to WAV
         if duration_sec < 1.0:
