@@ -688,24 +688,43 @@ def transcribe_video_internal(video_url: str, direct_url: str | None, language: 
         except Exception:
             pass
 
-        try:
-            audio = whisper.load_audio(wav_audio_path)
-        except Exception as exc:
-            return None, f"Failed to load audio for Whisper: {exc}"
-        if audio.size == 0:
-            return None, "Downloaded audio has no samples"
-        try:
-            audio_seconds = float(audio.shape[0]) / 16000.0
-        except Exception:
-            audio_seconds = 0.0
-        if audio_seconds < 1.0:
-            return None, "Downloaded audio is too short to transcribe"
+        def try_whisper(path: str):
+            try:
+                audio = whisper.load_audio(path)
+            except Exception as exc:
+                return None, f"Failed to load audio for Whisper: {exc}"
+            if audio.size == 0:
+                return None, "Downloaded audio has no samples"
+            try:
+                audio_seconds = float(audio.shape[0]) / 16000.0
+            except Exception:
+                audio_seconds = 0.0
+            if audio_seconds < 1.0:
+                return None, "Downloaded audio is too short to transcribe"
+            try:
+                audio = whisper.pad_or_trim(audio)
+                result = model.transcribe(audio, **transcribe_opts)
+            except Exception as exc:
+                return None, f"Whisper failed to transcribe audio: {exc}"
+            return result, None
 
-        try:
-            audio = whisper.pad_or_trim(audio)
-            result = model.transcribe(audio, **transcribe_opts)
-        except Exception as exc:
-            return None, f"Whisper failed to transcribe audio: {exc}"
+        result, err = try_whisper(wav_audio_path)
+        if err and "Whisper failed to transcribe audio" in err:
+            # Retry: re-extract as m4a and re-encode to wav
+            alt_audio_path, alt_err = run_ytdlp_audio("m4a", "bestaudio/best")
+            if not alt_err:
+                full_audio_path = alt_audio_path
+                reencode_result = subprocess.run([
+                    "ffmpeg", "-y",
+                    "-i", full_audio_path,
+                    "-ac", "1",
+                    "-ar", "16000",
+                    wav_audio_path,
+                ], capture_output=True, text=True)
+                if reencode_result.returncode == 0:
+                    result, err = try_whisper(wav_audio_path)
+        if err:
+            return None, err
         transcription_text = result['text']
         if language == 'ro-md':
             transcription_text = apply_moldovan_slang(transcription_text)
