@@ -495,6 +495,18 @@ def fetch_direct_url(video_url: str) -> str | None:
     cookiefile = get_cookiefile()
     log(f"Cookies loaded: {len(cookies)} items, msToken={'yes' if cookies.get('msToken') else 'no'}")
     
+    # Optional: Playwright first-pass (most robust when enabled)
+    if os.environ.get("PLAYWRIGHT_ENABLED", "0") == "1":
+        log("Method 0: Playwright capture (enabled)...")
+        pw_url = direct_url_via_playwright(video_url, log=log)
+        if pw_url:
+            normalized = normalize_direct_url(pw_url)
+            log(f"Playwright SUCCESS: {normalized[:120]}")
+            return normalized
+        log("Playwright FAILED")
+        if os.environ.get("PLAYWRIGHT_FORCE", "0") == "1":
+            return None
+
     def yt_dlp_get_url(use_impersonate: bool) -> str | None:
         cmd = [
             sys.executable, "-m", "yt_dlp",
@@ -562,16 +574,6 @@ def fetch_direct_url(video_url: str) -> str | None:
             normalized = normalize_direct_url(direct_from_html)
             log(f"Final regex SUCCESS: {normalized[:120]}")
             return normalized
-
-    # METODA 4: Playwright capture (most robust)
-    if os.environ.get("PLAYWRIGHT_ENABLED", "0") == "1":
-        log("Method 4: Playwright capture...")
-        pw_url = direct_url_via_playwright(video_url, log=log)
-        if pw_url:
-            normalized = normalize_direct_url(pw_url)
-            log(f"Playwright SUCCESS: {normalized[:120]}")
-            return normalized
-        log("Playwright FAILED")
 
     log("ALL METHODS FAILED")
     return None
