@@ -944,18 +944,32 @@ def try_fetch_subtitles(video_url: str, language: str | None) -> str | None:
         return None
     log(f"tracks keys: {list(tracks.keys())}")
 
-    lang = None
-    if language:
-        lang = 'ro' if language == 'ro-md' else language
-    if lang and lang not in tracks:
-        lang = None
-    if not lang:
-        for preferred in ('ro', 'ru', 'en'):
-            if preferred in tracks:
-                lang = preferred
-                break
-    if not lang:
-        lang = next(iter(tracks.keys()), None)
+    def pick_lang(tracks_map, requested):
+        keys = list(tracks_map.keys())
+        if not keys:
+            return None
+        if requested:
+            req = 'ro' if requested == 'ro-md' else requested
+            # exact match
+            if req in tracks_map:
+                return req
+            # prefix match (ro / ron / ro-RO etc.)
+            for k in keys:
+                if k.startswith(req):
+                    return k
+        # Auto: prefer Romanian variants first, then Russian, then English
+        for k in keys:
+            if k.startswith('ro') or k.startswith('ron'):
+                return k
+        for k in keys:
+            if k.startswith('ru'):
+                return k
+        for k in keys:
+            if k.startswith('en'):
+                return k
+        return keys[0]
+
+    lang = pick_lang(tracks, language)
     if not lang:
         log("no usable language found")
         return None
