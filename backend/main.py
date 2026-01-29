@@ -900,6 +900,15 @@ def extract_subtitle_text(raw_text: str, ext: str) -> str:
     return " ".join(lines).strip()
 
 def try_fetch_subtitles(video_url: str, language: str | None) -> str | None:
+    debug_log = Path("/tmp/tiktok_debug.log")
+    def log(msg: str):
+        try:
+            with open(debug_log, "a", encoding="utf-8") as handle:
+                handle.write(f"{datetime.now().isoformat()} subtitles: {msg}\n")
+        except Exception:
+            pass
+
+    log(f"start url={video_url}")
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
@@ -922,14 +931,16 @@ def try_fetch_subtitles(video_url: str, language: str | None) -> str | None:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=False)
     except Exception as exc:
-        print(f"Subtitle extraction failed for {video_url}: {exc}")
+        log(f"yt-dlp exception: {exc}")
         return None
 
     subtitles = info.get('subtitles') or {}
     auto_captions = info.get('automatic_captions') or {}
     tracks = subtitles or auto_captions
     if not tracks:
+        log("no subtitle tracks found")
         return None
+    log(f"tracks keys: {list(tracks.keys())}")
 
     lang = None
     if language:
@@ -944,10 +955,12 @@ def try_fetch_subtitles(video_url: str, language: str | None) -> str | None:
     if not lang:
         lang = next(iter(tracks.keys()), None)
     if not lang:
+        log("no usable language found")
         return None
 
     track_entries = tracks.get(lang) or []
     if not track_entries:
+        log(f"no entries for lang={lang}")
         return None
 
     preferred_exts = ('vtt', 'srt', 'json')
@@ -965,6 +978,7 @@ def try_fetch_subtitles(video_url: str, language: str | None) -> str | None:
     ext = chosen.get('ext', '')
     if not url:
         return None
+    log(f"chosen lang={lang} ext={ext} url={url[:120]}")
 
     with urllib.request.urlopen(url) as response:
         raw = response.read().decode('utf-8', errors='ignore')
