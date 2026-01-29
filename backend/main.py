@@ -810,7 +810,7 @@ def try_fetch_subtitles(video_url: str, language: str | None) -> str | None:
         'quiet': True,
         'no_warnings': True,
         'skip_download': True,
-        'no_playlist': True,
+        'noplaylist': True,
         'writesubtitles': True,
         'writeautomaticsub': True,
         'http_headers': {
@@ -856,7 +856,7 @@ def try_fetch_subtitles(video_url: str, language: str | None) -> str | None:
     if not track_entries:
         return None
 
-    preferred_exts = ('vtt', 'srt')
+    preferred_exts = ('vtt', 'srt', 'json')
     chosen = None
     for ext in preferred_exts:
         chosen = next((item for item in track_entries if item.get('ext') == ext and item.get('url')), None)
@@ -869,11 +869,29 @@ def try_fetch_subtitles(video_url: str, language: str | None) -> str | None:
 
     url = chosen.get('url')
     ext = chosen.get('ext', '')
-    if not url or ext not in preferred_exts:
+    if not url:
         return None
 
     with urllib.request.urlopen(url) as response:
         raw = response.read().decode('utf-8', errors='ignore')
+    if ext == 'json':
+        try:
+            payload = json.loads(raw)
+            lines = []
+            if isinstance(payload, dict):
+                cues = payload.get("body") or payload.get("captions") or payload.get("subtitles") or []
+            else:
+                cues = payload
+            if isinstance(cues, list):
+                for item in cues:
+                    if isinstance(item, dict):
+                        txt = item.get("text") or item.get("content")
+                        if txt:
+                            lines.append(str(txt).strip())
+            text = " ".join([t for t in lines if t])
+            return text or None
+        except Exception:
+            pass
     text = extract_subtitle_text(raw, ext)
     return text or None
 
