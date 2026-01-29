@@ -678,6 +678,16 @@ def transcribe_video_internal(video_url: str, direct_url: str | None, language: 
             whisper_lang = 'ro' if language == 'ro-md' else language
             transcribe_opts['language'] = whisper_lang
 
+        # Log sizes/duration to debug empty audio cases
+        try:
+            with open("/tmp/tiktok_debug.log", "a", encoding="utf-8") as handle:
+                handle.write(
+                    f"{datetime.now().isoformat()} audio bytes={os.path.getsize(wav_audio_path)} "
+                    f"duration={duration_sec:.3f}\n"
+                )
+        except Exception:
+            pass
+
         try:
             audio = whisper.load_audio(wav_audio_path)
         except Exception as exc:
@@ -692,6 +702,7 @@ def transcribe_video_internal(video_url: str, direct_url: str | None, language: 
             return None, "Downloaded audio is too short to transcribe"
 
         try:
+            audio = whisper.pad_or_trim(audio)
             result = model.transcribe(audio, **transcribe_opts)
         except Exception as exc:
             return None, f"Whisper failed to transcribe audio: {exc}"
