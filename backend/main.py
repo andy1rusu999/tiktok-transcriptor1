@@ -394,6 +394,90 @@ def normalize_direct_url(url: str) -> str | None:
         return cleaned
     return cleaned
 
+def deep_find_key(obj, key):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == key:
+                yield v
+            yield from deep_find_key(v, key)
+    elif isinstance(obj, list):
+        for it in obj:
+            yield from deep_find_key(it, key)
+
+def direct_url_via_playwright(video_url: str, log=None) -> str | None:
+    def _log(msg: str):
+        if callable(log):
+            try:
+                log(msg)
+            except Exception:
+                pass
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception as exc:
+        _log(f"Playwright not available: {exc}")
+        return None
+
+    cookies = load_cookie_jar()
+    pw_cookies = []
+    for name, value in cookies.items():
+        pw_cookies.append({
+            "name": name,
+            "value": value,
+            "domain": ".tiktok.com",
+            "path": "/",
+        })
+
+    found = {"url": None}
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context()
+        if pw_cookies:
+            context.add_cookies(pw_cookies)
+        page = context.new_page()
+
+        def handle_response(resp):
+            if found["url"]:
+                return
+            try:
+                ct = resp.headers.get("content-type", "")
+                if "application/json" not in ct:
+                    return
+                if not any(x in resp.url for x in ["item/detail", "aweme", "api"]):
+                    return
+                data = resp.json()
+                for v in deep_find_key(data, "playAddr"):
+                    if isinstance(v, str) and v.startswith("http"):
+                        found["url"] = v
+                        return
+                    if isinstance(v, dict):
+                        url_list = v.get("urlList") or v.get("url_list") or []
+                        for u in url_list:
+                            if isinstance(u, str) and u.startswith("http"):
+                                found["url"] = u
+                                return
+                for v in deep_find_key(data, "downloadAddr"):
+                    if isinstance(v, str) and v.startswith("http"):
+                        found["url"] = v
+                        return
+                    if isinstance(v, dict):
+                        url_list = v.get("urlList") or v.get("url_list") or []
+                        for u in url_list:
+                            if isinstance(u, str) and u.startswith("http"):
+                                found["url"] = u
+                                return
+            except Exception:
+                return
+
+        page.on("response", handle_response)
+        page.goto(video_url, wait_until="domcontentloaded", timeout=20000)
+        page.wait_for_timeout(3000)
+
+        context.close()
+        browser.close()
+
+    return found["url"]
+
 def fetch_direct_url(video_url: str) -> str | None:
     debug_log = Path("/tmp/tiktok_debug.log")
     
@@ -478,6 +562,16 @@ def fetch_direct_url(video_url: str) -> str | None:
             normalized = normalize_direct_url(direct_from_html)
             log(f"Final regex SUCCESS: {normalized[:120]}")
             return normalized
+
+    # METODA 4: Playwright capture (most robust)
+    if os.environ.get("PLAYWRIGHT_ENABLED", "0") == "1":
+        log("Method 4: Playwright capture...")
+        pw_url = direct_url_via_playwright(video_url, log=log)
+        if pw_url:
+            normalized = normalize_direct_url(pw_url)
+            log(f"Playwright SUCCESS: {normalized[:120]}")
+            return normalized
+        log("Playwright FAILED")
 
     log("ALL METHODS FAILED")
     return None
