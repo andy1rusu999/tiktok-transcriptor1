@@ -1185,6 +1185,13 @@ def _run_batch_job(job_id: str):
                 return
             job["results"][video_id] = {"status": "processing"}
             job["updated_at"] = datetime.utcnow().isoformat()
+        subtitles_text = None
+        subtitles_error = None
+        if video_url:
+            subtitles_text = try_fetch_subtitles(video_url, language if language != 'auto' else None)
+            if not subtitles_text:
+                subtitles_error = "not_found"
+
         if not video_url or not video_id:
             result = {"status": "error", "error": "Missing video url or id"}
         else:
@@ -1193,6 +1200,11 @@ def _run_batch_job(job_id: str):
                 result = {"status": "error", "error": err}
             else:
                 result = {"status": "completed", "transcription": transcription}
+
+        if subtitles_text:
+            result["subtitles"] = subtitles_text
+        elif subtitles_error:
+            result["subtitles_error"] = subtitles_error
 
         with _JOB_LOCK:
             job = _JOBS.get(job_id)

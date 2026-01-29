@@ -152,10 +152,24 @@ function App() {
             return { ...v, status: 'processing' };
           }
           if (result.status === 'completed') {
-            return { ...v, status: 'completed', transcription: result.transcription };
+            const next: VideoData = { ...v, status: 'completed', transcription: result.transcription };
+            if (result.subtitles) {
+              next.subtitles = result.subtitles;
+              next.subtitlesStatus = 'completed';
+            } else if (result.subtitles_error) {
+              next.subtitlesStatus = 'error';
+            }
+            return next;
           }
           if (result.status === 'error') {
-            return { ...v, status: 'error' };
+            const next: VideoData = { ...v, status: 'error' };
+            if (result.subtitles) {
+              next.subtitles = result.subtitles;
+              next.subtitlesStatus = 'completed';
+            } else if (result.subtitles_error) {
+              next.subtitlesStatus = 'error';
+            }
+            return next;
           }
           return v;
         }));
@@ -415,12 +429,13 @@ function App() {
       return needsQuotes ? `"${escaped}"` : escaped;
     };
 
-    const header = ['id', 'url', 'title', 'transcription'].join(',');
+    const header = ['id', 'url', 'title', 'transcription', 'subtitles'].join(',');
     const rows = videos.map((video) => [
       escapeCsv(video.id),
       escapeCsv(video.url),
       escapeCsv(video.title),
       escapeCsv(video.transcription),
+      escapeCsv(video.subtitles),
     ].join(','));
 
     const csvContent = [header, ...rows].join('\n');
