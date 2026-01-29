@@ -42,6 +42,7 @@ interface VideoData {
   duration: string;
   status: 'pending' | 'processing' | 'completed' | 'error';
   transcription?: string;
+  error?: string;
   subtitles?: string;
   subtitlesStatus?: 'idle' | 'loading' | 'completed' | 'error';
   language: string;
@@ -152,7 +153,7 @@ function App() {
             return { ...v, status: 'processing' };
           }
           if (result.status === 'completed') {
-            const next: VideoData = { ...v, status: 'completed', transcription: result.transcription };
+            const next: VideoData = { ...v, status: 'completed', transcription: result.transcription, error: undefined };
             if (result.subtitles) {
               next.subtitles = result.subtitles;
               next.subtitlesStatus = 'completed';
@@ -162,7 +163,7 @@ function App() {
             return next;
           }
           if (result.status === 'error') {
-            const next: VideoData = { ...v, status: 'error' };
+            const next: VideoData = { ...v, status: 'error', error: result.error || 'Eroare la transcriere' };
             if (result.subtitles) {
               next.subtitles = result.subtitles;
               next.subtitlesStatus = 'completed';
@@ -320,7 +321,7 @@ function App() {
         const serverError = data?.error || `Eroare server: ${response.status}`;
         toast.error(`Eroare la transcriere: ${serverError}`);
         setVideos(prev => prev.map(v => 
-          v.id === videoId ? { ...v, status: 'error' } : v
+          v.id === videoId ? { ...v, status: 'error', error: serverError } : v
         ));
         return;
       }
@@ -332,7 +333,8 @@ function App() {
         v.id === videoId ? { 
           ...v, 
           status: 'completed',
-          transcription: data.transcription
+          transcription: data.transcription,
+          error: undefined
         } : v
       ));
 
@@ -806,7 +808,9 @@ function App() {
                             <TabsContent value="transcription" className="mt-3">
                               <div className="p-3 bg-white border rounded-md">
                                 <p className="text-sm text-slate-700 whitespace-pre-wrap">
-                                  {video.transcription || 'Transcrierea nu este disponibilă încă.'}
+                                  {video.status === 'error'
+                                    ? (video.error || 'Transcrierea a eșuat.')
+                                    : (video.transcription || 'Transcrierea nu este disponibilă încă.')}
                                 </p>
                               </div>
                             </TabsContent>
