@@ -588,23 +588,34 @@ def transcribe_video_internal(video_url: str, direct_url: str | None, language: 
         full_audio_path = audio_path + '.mp3'
         wav_audio_path = audio_path + '.wav'
 
-        # Extract audio via yt-dlp
-        yt_dlp_audio = [
-            sys.executable, "-m", "yt_dlp",
-            "--no-playlist",
-            "--cookies", get_cookiefile() if get_cookiefile() else "/dev/null",
-            "--no-warnings",
-            "--add-header", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "--add-header", "Referer: https://www.tiktok.com/",
-            "-x",
-            "--audio-format", "mp3",
-            "--audio-quality", "2",
-            "-o", audio_path,
-            video_url,
-        ]
-        ytdlp_audio_result = subprocess.run(yt_dlp_audio, capture_output=True, text=True)
-        if ytdlp_audio_result.returncode != 0:
-            return None, f"Failed to extract audio: {ytdlp_audio_result.stderr}"
+        def run_ytdlp_audio(audio_format: str, format_selector: str):
+            output_tpl = f"{audio_path}_{audio_format}.%(ext)s"
+            expected_path = f"{audio_path}_{audio_format}.{audio_format}"
+            yt_dlp_audio = [
+                sys.executable, "-m", "yt_dlp",
+                "--no-playlist",
+                "--cookies", get_cookiefile() if get_cookiefile() else "/dev/null",
+                "--no-warnings",
+                "--format", format_selector,
+                "--add-header", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                "--add-header", "Referer: https://www.tiktok.com/",
+                "-x",
+                "--audio-format", audio_format,
+                "--audio-quality", "2",
+                "-o", output_tpl,
+                video_url,
+            ]
+            result = subprocess.run(yt_dlp_audio, capture_output=True, text=True)
+            if result.returncode != 0:
+                return None, result.stderr
+            if not os.path.exists(expected_path):
+                return None, "Audio file was not created"
+            return expected_path, None
+
+        # Attempt 1: mp3 via bestaudio
+        full_audio_path, err = run_ytdlp_audio("mp3", "bestaudio/best")
+        if err:
+            return None, f"Failed to extract audio: {err}"
 
         # Validate duration
         probe_cmd = [
@@ -622,7 +633,20 @@ def transcribe_video_internal(video_url: str, direct_url: str | None, language: 
         except ValueError:
             duration_sec = 0.0
         if duration_sec <= 0.5:
-            return None, "Downloaded audio is too short to transcribe"
+            # Retry with wav in case mp3 extraction is truncated
+            alt_audio_path, alt_err = run_ytdlp_audio("wav", "bestaudio/best")
+            if alt_err:
+                return None, "Downloaded audio is too short to transcribe"
+            full_audio_path = alt_audio_path
+            probe_result = subprocess.run(probe_cmd[:-1] + [full_audio_path], capture_output=True, text=True)
+            if probe_result.returncode != 0:
+                return None, f"Failed to probe audio: {probe_result.stderr}"
+            try:
+                duration_sec = float((probe_result.stdout or "").strip() or "0")
+            except ValueError:
+                duration_sec = 0.0
+            if duration_sec <= 0.5:
+                return None, "Downloaded audio is too short to transcribe"
         if duration_sec > 1800:
             return None, "Clipul depășește durata maximă de 30 de minute"
 
